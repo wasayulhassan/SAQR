@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAQR — Local Analysis Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="scanline"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">◈</span>
+    <span class="brand-name">SAQR</span>
+    <span class="brand-sub">صقر · local analysis console</span>
+  </div>
+  <div class="status-strip" id="statusStrip">
+    <div class="status-chip" id="ollamaStatus"><span class="dot"></span>LLM: checking…</div>
+    <div class="status-chip"><span class="dot dot-static"></span>engine: hosted (free)</div>
+  </div>
+</header>
+
+<main class="grid">
+
+  <!-- LEFT: Tool rail -->
+  <nav class="rail">
+    <button class="rail-btn active" data-panel="chat">01 · Chat</button>
+    <button class="rail-btn" data-panel="analyze">02 · Analyze</button>
+    <button class="rail-btn" data-panel="solve">03 · Solve</button>
+    <button class="rail-btn" data-panel="export">04 · Export</button>
+  </nav>
+
+  <!-- PANEL: Chat -->
+  <section class="panel active" id="panel-chat">
+    <div class="panel-head">
+      <h1>General reasoning</h1>
+      <p>Ask anything. Backed by a local model — no data leaves this machine.</p>
+    </div>
+    <div class="chat-window" id="chatWindow">
+      <div class="msg msg-bot">
+        <span class="msg-tag">SAQR</span>
+        Console online. Upload a dataset in <b>Analyze</b>, run a calculation in <b>Solve</b>, or just ask me something here.
+      </div>
+    </div>
+    <form class="chat-input-row" id="chatForm">
+      <input type="text" id="chatInput" placeholder="Ask SAQR…" autocomplete="off">
+      <button type="submit">Send</button>
+    </form>
+  </section>
+
+  <!-- PANEL: Analyze -->
+  <section class="panel" id="panel-analyze">
+    <div class="panel-head">
+      <h1>Data analysis</h1>
+      <p>Upload a CSV or Excel file for stats, trend detection, and anomaly flags.</p>
+    </div>
+
+    <div class="dropzone" id="dropzone">
+      <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" hidden>
+      <div class="dropzone-inner">
+        <span class="dz-icon">⇪</span>
+        <p><b>Drop a file</b> or click to browse</p>
+        <p class="dz-hint">.csv · .xlsx · .xls</p>
+      </div>
+    </div>
+
+    <div id="analysisResults" class="analysis-results hidden">
+      <div class="result-block">
+        <h2>Overview</h2>
+        <div id="overviewStats" class="stat-row"></div>
+      </div>
+      <div class="result-block">
+        <h2>Trends</h2>
+        <ul id="trendsList" class="data-list"></ul>
+      </div>
+      <div class="result-block">
+        <h2>Anomalies</h2>
+        <ul id="anomaliesList" class="data-list"></ul>
+      </div>
+      <div class="result-block">
+        <h2>Charts</h2>
+        <div id="chartsGrid" class="charts-grid"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PANEL: Solve -->
+  <section class="panel" id="panel-solve">
+    <div class="panel-head">
+      <h1>Problem solving</h1>
+      <p>Equations, calculus, and linear optimization — computed exactly, not guessed.</p>
+    </div>
+
+    <div class="solve-tabs">
+      <button class="solve-tab active" data-mode="equation">Solve equation</button>
+      <button class="solve-tab" data-mode="simplify">Simplify</button>
+      <button class="solve-tab" data-mode="derivative">Derivative</button>
+      <button class="solve-tab" data-mode="integral">Integral</button>
+      <button class="solve-tab" data-mode="optimize">Optimize (LP)</button>
+    </div>
+
+    <div class="solve-body" id="solveSimple">
+      <label>Expression <span class="hint">e.g. x**2 - 4 = 0</span></label>
+      <input type="text" id="solveExpr" placeholder="x**2 - 4 = 0">
+      <label>Variable</label>
+      <input type="text" id="solveVar" value="x" style="max-width:120px;">
+      <button class="run-btn" id="solveRunBtn">Compute</button>
+      <div class="solve-output" id="solveOutput"></div>
+    </div>
+
+    <div class="solve-body hidden" id="solveOptimize">
+      <label>Objective coefficients (comma-sep, e.g. maximize 3x + 5y → 3,5)</label>
+      <input type="text" id="optC" placeholder="3,5">
+      <label>Inequality constraint matrix rows, one per line (A·x ≤ b) — format: a,b | rhs</label>
+      <textarea id="optA" rows="3" placeholder="1,2 | 10&#10;3,1 | 15"></textarea>
+      <button class="run-btn" id="optimizeRunBtn">Solve LP</button>
+      <div class="solve-output" id="optimizeOutput"></div>
+    </div>
+  </section>
+
+  <!-- PANEL: Export -->
+  <section class="panel" id="panel-export">
+    <div class="panel-head">
+      <h1>Report &amp; deck export</h1>
+      <p>Turn your last analysis into a Word report or PowerPoint deck.</p>
+    </div>
+    <div class="export-grid">
+      <div class="export-card">
+        <h2>Word report</h2>
+        <p>Overview, statistics table, trends, anomalies, and charts.</p>
+        <input type="text" id="reportTitle" placeholder="Report title" value="Data Analysis Report">
+        <button class="run-btn" id="reportBtn">Generate .docx</button>
+        <div class="export-status" id="reportStatus"></div>
+      </div>
+      <div class="export-card">
+        <h2>PowerPoint deck</h2>
+        <p>Title slide, overview, trends, anomalies, and chart slides.</p>
+        <input type="text" id="pptTitle" placeholder="Deck title" value="Data Analysis">
+        <button class="run-btn" id="pptBtn">Generate .pptx</button>
+        <div class="export-status" id="pptStatus"></div>
+      </div>
+    </div>
+    <p class="export-note" id="exportNote">Run an analysis in the <b>Analyze</b> panel first — exports are built from your last uploaded dataset.</p>
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
