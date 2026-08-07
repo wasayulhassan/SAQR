@@ -1,7 +1,8 @@
 """
 chatbot.py
-Talks to the free Hugging Face Inference API for general reasoning / Q&A.
-No cost, no credit card — just a free HF account + access token.
+Talks to the free Hugging Face Inference Providers API (router.huggingface.co)
+for general reasoning / Q&A. No cost, no credit card — just a free HF
+account + access token.
 
 Setup (one-time):
     1. Create a free account: https://huggingface.co/join
@@ -20,8 +21,8 @@ import os
 import requests
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
-DEFAULT_MODEL = "HuggingFaceH4/zephyr-7b-beta"
-HF_API_URL = f"https://api-inference.huggingface.co/models/{DEFAULT_MODEL}"
+DEFAULT_MODEL = "google/gemma-2-2b-it"
+HF_API_URL = "https://router.huggingface.co/hf-inference/v1/chat/completions"
 
 SYSTEM_PROMPT = (
     "You are Saqr, an assistant specialized in data analysis, report "
@@ -34,23 +35,13 @@ SYSTEM_PROMPT = (
 
 def is_ollama_running() -> bool:
     """Kept name for backward compatibility with app.py's /api/status route.
-    Really checks whether the free hosted chat model is reachable."""
-    if not HF_TOKEN:
-        return False
-    try:
-        r = requests.get(
-            "https://api-inference.huggingface.co/status/" + DEFAULT_MODEL,
-            headers={"Authorization": f"Bearer {HF_TOKEN}"},
-            timeout=5,
-        )
-        return r.status_code == 200
-    except requests.exceptions.RequestException:
-        return False
+    Really checks whether a free HF_TOKEN is configured."""
+    return bool(HF_TOKEN)
 
 
 def chat(message: str, model: str = None, history=None) -> str:
     """
-    Send a message to the free Hugging Face Inference API and return its reply.
+    Send a message to the free Hugging Face router API and return its reply.
     `history` is an optional list of {"role": "user"/"assistant", "content": str}
     """
     if not HF_TOKEN:
@@ -61,30 +52,32 @@ def chat(message: str, model: str = None, history=None) -> str:
             "Data analysis, report, PPT, and solver tools still work without it."
         )
 
-    convo = f"<|system|>\n{SYSTEM_PROMPT}</s>\n"
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         for turn in history:
-            tag = "user" if turn["role"] == "user" else "assistant"
-            convo += f"<|{tag}|>\n{turn['content']}</s>\n"
-    convo += f"<|user|>\n{message}</s>\n<|assistant|>\n"
+            role = "user" if turn["role"] == "user" else "assistant"
+            messages.append({"role": role, "content": turn["content"]})
+    messages.append({"role": "user", "content": message})
 
     try:
         resp = requests.post(
             HF_API_URL,
-            headers={"Authorization": f"Bearer {HF_TOKEN}"},
+            headers={
+                "Authorization": f"Bearer {HF_TOKEN}",
+                "Content-Type": "application/json",
+            },
             json={
-                "inputs": convo,
-                "parameters": {"max_new_tokens": 400, "temperature": 0.7, "return_full_text": False},
-                "options": {"wait_for_model": True},
+                "model": model or DEFAULT_MODEL,
+                "messages": messages,
+                "max_tokens": 400,
+                "temperature": 0.7,
             },
             timeout=60,
         )
         resp.raise_for_status()
         data = resp.json()
-        if isinstance(data, list) and data and "generated_text" in data[0]:
-            return data[0]["generated_text"].strip()
-        if isinstance(data, dict) and "error" in data:
-            return f"⚠️ Model is warming up or unavailable: {data['error']}"
-        return "⚠️ Unexpected response from the chat model."
+        return data["choices"][0]["message"]["content"].strip()
     except requests.exceptions.RequestException as e:
         return f"⚠️ Error talking to the hosted chat model: {e}"
+    except (KeyError, IndexError, ValueError):
+        return "⚠️ Unexpected response from the chat model. Try again in a moment."
