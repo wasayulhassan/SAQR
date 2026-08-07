@@ -35,6 +35,84 @@ const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
 let chatHistory = [];
 
+// ---------- lightweight markdown rendering for bot replies ----------
+// Model replies come back as markdown-ish text (bold, lists, paragraphs).
+// This turns that into clean, evenly-spaced HTML instead of showing the
+// raw asterisks/dashes as literal characters. Escapes HTML first so
+// nothing from the model (or a file's contents) can inject markup.
+function escapeHtml(str){
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function renderInline(text){
+  let s = escapeHtml(text);
+  s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+  s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
+  return s;
+}
+
+function renderMarkdown(raw){
+  const lines = raw.replace(/\r\n/g, "\n").split("\n");
+  const htmlBlocks = [];
+  let i = 0;
+
+  while(i < lines.length){
+    const line = lines[i];
+
+    if(line.trim() === ""){ i++; continue; }
+
+    // headings
+    const heading = line.match(/^(#{1,6})\s+(.*)/);
+    if(heading){
+      htmlBlocks.push(`<p class="msg-heading">${renderInline(heading[2])}</p>`);
+      i++;
+      continue;
+    }
+
+    // unordered list
+    if(/^\s*[-*+]\s+/.test(line)){
+      const items = [];
+      while(i < lines.length && /^\s*[-*+]\s+/.test(lines[i])){
+        items.push(`<li>${renderInline(lines[i].replace(/^\s*[-*+]\s+/, ""))}</li>`);
+        i++;
+      }
+      htmlBlocks.push(`<ul>${items.join("")}</ul>`);
+      continue;
+    }
+
+    // ordered list
+    if(/^\s*\d+\.\s+/.test(line)){
+      const items = [];
+      while(i < lines.length && /^\s*\d+\.\s+/.test(lines[i])){
+        items.push(`<li>${renderInline(lines[i].replace(/^\s*\d+\.\s+/, ""))}</li>`);
+        i++;
+      }
+      htmlBlocks.push(`<ol>${items.join("")}</ol>`);
+      continue;
+    }
+
+    // paragraph — collect consecutive non-blank, non-list, non-heading lines
+    const para = [];
+    while(
+      i < lines.length && lines[i].trim() !== "" &&
+      !/^\s*[-*+]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i]) &&
+      !/^#{1,6}\s+/.test(lines[i])
+    ){
+      para.push(renderInline(lines[i]));
+      i++;
+    }
+    htmlBlocks.push(`<p>${para.join("<br>")}</p>`);
+  }
+
+  return htmlBlocks.join("") || `<p>${renderInline(raw)}</p>`;
+}
+
 function addMsg(text, who){
   const div = document.createElement("div");
   div.className = "msg " + (who === "user" ? "msg-user" : "msg-bot");
@@ -42,7 +120,16 @@ function addMsg(text, who){
   tag.className = "msg-tag";
   tag.textContent = who === "user" ? t("you_tag") : "SAQR";
   div.appendChild(tag);
-  div.appendChild(document.createTextNode(text));
+
+  const body = document.createElement("div");
+  body.className = "msg-body";
+  if(who === "user"){
+    body.textContent = text; // user input stays plain, no markdown parsing needed
+  } else {
+    body.innerHTML = renderMarkdown(text);
+  }
+  div.appendChild(body);
+
   chatWindow.appendChild(div);
   chatWindow.scrollTop = chatWindow.scrollHeight;
 }
@@ -57,7 +144,7 @@ chatForm.addEventListener("submit", async (e) => {
 
   const thinking = document.createElement("div");
   thinking.className = "msg msg-bot";
-  thinking.innerHTML = '<span class="msg-tag">SAQR</span>…';
+  thinking.innerHTML = '<span class="msg-tag">SAQR</span><div class="msg-body"><span class="typing-dots"><span></span><span></span><span></span></span></div>';
   chatWindow.appendChild(thinking);
   chatWindow.scrollTop = chatWindow.scrollHeight;
 
@@ -75,6 +162,76 @@ chatForm.addEventListener("submit", async (e) => {
     thinking.remove();
     addMsg("⚠️ Couldn't reach the server.", "bot");
   }
+});
+
+// ---------- chat file attachment ----------
+const chatAttachBtn = document.getElementById("chatAttachBtn");
+const chatFileInput = document.getElementById("chatFileInput");
+const chatFileChip = document.getElementById("chatFileChip");
+const chatFileChipName = document.getElementById("chatFileChipName");
+const chatFileChipMeta = document.getElementById("chatFileChipMeta");
+const chatFileRemoveBtn = document.getElementById("chatFileRemoveBtn");
+
+let attachedChatFile = null; // {filename, meta}
+
+chatAttachBtn.addEventListener("click", () => chatFileInput.click());
+
+chatFileInput.addEventListener("change", async () => {
+  if(!chatFileInput.files.length) return;
+  const file = chatFileInput.files[0];
+
+  const thinking = document.createElement("div");
+  thinking.className = "msg msg-bot msg-file";
+  const thinkingTag = document.createElement("span");
+  thinkingTag.className = "msg-tag";
+  thinkingTag.textContent = "SAQR";
+  const thinkingBody = document.createElement("div");
+  thinkingBody.className = "msg-body";
+  thinkingBody.textContent = saqrFormat("uploading_file", {filename: file.name});
+  thinking.appendChild(thinkingTag);
+  thinking.appendChild(thinkingBody);
+  chatWindow.appendChild(thinking);
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try{
+    const res = await fetch("/api/chat_upload", { method: "POST", body: formData });
+    const data = await res.json();
+    thinking.remove();
+
+    if(!data.ok){
+      addMsg(saqrFormat("file_attach_error", {error: data.error}), "bot");
+      return;
+    }
+
+    attachedChatFile = { filename: data.filename, meta: data.meta };
+    chatFileChipName.textContent = data.filename;
+    chatFileChipMeta.textContent = data.meta;
+    chatFileChip.classList.remove("hidden");
+    chatAttachBtn.classList.add("has-file");
+
+    addMsg(saqrFormat("file_attached_msg", { filename: data.filename, meta: data.meta }), "bot");
+  }catch(err){
+    thinking.remove();
+    addMsg(saqrFormat("file_attach_error", {error: String(err)}), "bot");
+  }
+
+  chatFileInput.value = "";
+});
+
+chatFileRemoveBtn.addEventListener("click", async () => {
+  if(!attachedChatFile) return;
+  const removedName = attachedChatFile.filename;
+  try{
+    await fetch("/api/chat_file_clear", { method: "POST" });
+  }catch(err){ /* best effort */ }
+
+  attachedChatFile = null;
+  chatFileChip.classList.add("hidden");
+  chatAttachBtn.classList.remove("has-file");
+  addMsg(saqrFormat("file_removed_msg", { filename: removedName }), "bot");
 });
 
 // ---------- analyze / upload ----------
