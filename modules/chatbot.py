@@ -51,39 +51,93 @@ def is_ollama_running() -> bool:
     return bool(HF_TOKEN)
 
 
-def _build_system_prompt(data_context: dict = None) -> str:
-    if not data_context:
-        return SYSTEM_PROMPT
-    return (
-        SYSTEM_PROMPT
-        + "\n\nThe user currently has a dataset loaded in the Analyze tab. "
-          "Here is a compact summary of it (row/column counts, trends, and "
-          "anomaly counts) — use it to answer questions about their data. "
-          "You don't have the raw row-level values, so if they ask for an "
-          "exact individual value, say you don't have that level of detail "
-          "and point them to the Analyze or Charts tab:\n"
-        + json.dumps(data_context, default=str)
-    )
+def _build_system_prompt(data_context: dict = None, file_context: dict = None) -> str:
+    prompt = SYSTEM_PROMPT
+
+    if data_context:
+        prompt += (
+            "\n\nThe user currently has a dataset loaded in the Analyze tab. "
+            "Here is a compact summary of it (row/column counts, trends, and "
+            "anomaly counts) — use it to answer questions about their data. "
+            "You don't have the raw row-level values from this one, so if "
+            "they ask for an exact individual value, say you don't have "
+            "that level of detail and point them to the Analyze or Charts tab:\n"
+            + json.dumps(data_context, default=str)
+        )
+
+    if file_context:
+        truncated_note = (
+            " (this is a partial excerpt — the file is longer than what's shown)"
+            if file_context.get("truncated") else ""
+        )
+        prompt += (
+            f"\n\nThe user has attached a file directly in this chat: "
+            f"'{file_context.get('filename')}' ({file_context.get('meta')}). "
+            f"Have a real conversation with them about it — answer questions, "
+            f"point out issues, summarize sections, whatever they need. "
+            f"Here is its extracted content{truncated_note}:\n"
+            + file_context.get("content_text", "")
+        )
+
+    return prompt
 
 
-def _call_model(model: str, messages: list) -> requests.Response:
+def _call_model(model: str, messages: list, max_tokens: int = 400, temperature: float = 0.7) -> requests.Response:
     return requests.post(
         HF_API_URL,
         headers={
             "Authorization": f"Bearer {HF_TOKEN}",
             "Content-Type": "application/json",
         },
-        json={"model": model, "messages": messages, "max_tokens": 400, "temperature": 0.7},
-        timeout=60,
+        json={"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature},
+        timeout=90,
     )
 
 
-def chat(message: str, model: str = None, history=None, data_context: dict = None) -> str:
+def chat_raw(system_prompt: str, user_prompt: str, max_tokens: int = 1200, temperature: float = 0.8) -> str:
+    """Lower-level call used by other modules (e.g. ai_ppt.py) that need a
+    single free-form completion rather than the chat-panel conversation
+    flow. Raises RuntimeError on failure so callers can decide their own
+    fallback behavior (unlike chat(), which always returns a friendly
+    string since it's shown directly in the chat UI)."""
+    if not HF_TOKEN:
+        raise RuntimeError("HF_TOKEN not configured")
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    last_error = None
+    for candidate_model in MODEL_CANDIDATES:
+        try:
+            resp = _call_model(candidate_model, messages, max_tokens=max_tokens, temperature=temperature)
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+            continue
+        if not resp.ok:
+            last_error = f"{resp.status_code} error from '{candidate_model}'"
+            continue
+        try:
+            data = resp.json()
+            return data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, ValueError):
+            last_error = "Unexpected response format"
+            continue
+
+    raise RuntimeError(last_error or "All chat models unavailable")
+
+
+def chat(message: str, model: str = None, history=None, data_context: dict = None,
+         file_context: dict = None) -> str:
     """
     Send a message to the free Hugging Face router API and return its reply.
     `history` is an optional list of {"role": "user"/"assistant", "content": str}
     `data_context` is an optional compact dict describing the currently
     loaded dataset (see app.py), used to ground answers in real data.
+    `file_context` is an optional dict describing a file attached directly
+    in the chat panel (see modules/file_context.py) — filename, meta, and
+    extracted text — used to have a real conversation about that file.
     """
     if not HF_TOKEN:
         return (
@@ -93,7 +147,7 @@ def chat(message: str, model: str = None, history=None, data_context: dict = Non
             "Data analysis, report, PPT, and solver tools still work without it."
         )
 
-    messages = [{"role": "system", "content": _build_system_prompt(data_context)}]
+    messages = [{"role": "system", "content": _build_system_prompt(data_context, file_context)}]
     if history:
         for turn in history:
             role = "user" if turn["role"] == "user" else "assistant"
