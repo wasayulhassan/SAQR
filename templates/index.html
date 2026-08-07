@@ -122,10 +122,28 @@
           <span data-i18n="chat_intro">Console online. Upload a dataset in Analyze, run a calculation in Solve, or just ask me something here.</span>
         </div>
       </div>
+      <div class="chat-file-chip hidden" id="chatFileChip">
+        <span class="chip-icon">📎</span>
+        <span class="chip-text">
+          <span class="chip-name" id="chatFileChipName" dir="ltr"></span>
+          <span class="chip-meta" id="chatFileChipMeta" dir="ltr"></span>
+        </span>
+        <button type="button" class="chip-ppt-btn" id="createPptBtn" data-i18n-title="create_ppt_btn_title" title="Create Presentation">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16v11H4z" stroke="currentColor" stroke-width="2"/><path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span data-i18n="create_ppt_btn">Create Presentation</span>
+        </button>
+        <button type="button" class="chip-remove" id="chatFileRemoveBtn" data-i18n-title="remove_attachment_title" title="Remove attachment">×</button>
+      </div>
+
       <form class="chat-input-row" id="chatForm">
+        <input type="file" id="chatFileInput" accept=".csv,.xlsx,.xls,.txt,.pdf,.docx" hidden>
+        <button type="button" class="chat-attach-btn" id="chatAttachBtn" data-i18n-title="attach_file_title" title="Attach a file">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.07-7.07l8.59-8.6a3.5 3.5 0 0 1 4.95 4.95l-8.6 8.6a2 2 0 0 1-2.83-2.83l7.78-7.78" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
         <input type="text" id="chatInput" data-i18n-placeholder="chat_placeholder" placeholder="Ask SAQR…" autocomplete="off">
         <button type="submit" data-i18n="send_btn">Send</button>
       </form>
+      <p class="chat-file-hint" data-i18n="chat_file_hint">Attach a CSV, Excel, PDF, Word, or text file to ask SAQR anything about it.</p>
     </section>
 
     <!-- PANEL: Analyze -->
