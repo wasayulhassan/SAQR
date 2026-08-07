@@ -9,20 +9,22 @@ document.querySelectorAll(".rail-btn").forEach(btn => {
 });
 
 // ---------- status check ----------
+const t = (typeof saqrT === "function") ? saqrT : (key) => key;
+
 async function checkStatus(){
   try{
     const res = await fetch("/api/status");
     const data = await res.json();
     const chip = document.getElementById("ollamaStatus");
     if(data.ollama_running){
-      chip.innerHTML = '<span class="dot"></span>LLM: online';
+      chip.innerHTML = '<span class="dot"></span>' + t("llm_online");
       chip.classList.add("ok");
     } else {
-      chip.innerHTML = '<span class="dot"></span>LLM: offline';
+      chip.innerHTML = '<span class="dot"></span>' + t("llm_offline");
       chip.classList.add("down");
     }
   }catch(e){
-    document.getElementById("ollamaStatus").innerHTML = '<span class="dot"></span>LLM: unknown';
+    document.getElementById("ollamaStatus").innerHTML = '<span class="dot"></span>' + t("llm_unknown");
   }
 }
 checkStatus();
@@ -38,7 +40,7 @@ function addMsg(text, who){
   div.className = "msg " + (who === "user" ? "msg-user" : "msg-bot");
   const tag = document.createElement("span");
   tag.className = "msg-tag";
-  tag.textContent = who === "user" ? "YOU" : "SAQR";
+  tag.textContent = who === "user" ? t("you_tag") : "SAQR";
   div.appendChild(tag);
   div.appendChild(document.createTextNode(text));
   chatWindow.appendChild(div);
@@ -331,3 +333,11 @@ async function generateExport(kind){
 
 document.getElementById("reportBtn").addEventListener("click", () => generateExport("report"));
 document.getElementById("pptBtn").addEventListener("click", () => generateExport("ppt"));
+
+// ---------- dashboard quick actions ----------
+document.querySelectorAll(".qa-card[data-goto]").forEach(card => {
+  card.addEventListener("click", () => {
+    const target = document.querySelector('.rail-btn[data-panel="' + card.dataset.goto + '"]');
+    if(target) target.click();
+  });
+});
