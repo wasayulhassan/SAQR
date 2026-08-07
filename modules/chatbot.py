@@ -1,12 +1,15 @@
 """
 chatbot.py
-Talks to the free Hugging Face Inference Providers API (router.huggingface.co)
-for general reasoning / Q&A — and, when a dataset is currently loaded in
-SAQR, answers questions grounded in that dataset's stats/trends/anomalies.
+Talks to the free Hugging Face Inference Providers router for general
+reasoning / Q&A — and, when a dataset is currently loaded in SAQR, answers
+questions grounded in that dataset's stats/trends/anomalies.
 
 Setup (one-time):
     1. Create a free account: https://huggingface.co/join
-    2. Create a free access token: https://huggingface.co/settings/tokens
+    2. Create a FINE-GRAINED access token: https://huggingface.co/settings/tokens
+       Under the "Inference" section, check "Make calls to Inference
+       Providers" — this exact permission is required, a plain "Read"
+       token is not enough.
     3. Set it as an environment variable named HF_TOKEN wherever this app
        runs (locally: `export HF_TOKEN=hf_xxx` before `python app.py`;
        on Render: add it under Environment in your service settings)
@@ -21,11 +24,17 @@ import json
 import requests
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
-# Ungated, freely-licensed model — no HF terms-acceptance required, unlike
-# Google's Gemma or Meta's Llama models which return 403 until you accept
-# their license on huggingface.co first.
-DEFAULT_MODEL = "microsoft/Phi-3-mini-4k-instruct"
-HF_API_URL = "https://router.huggingface.co/hf-inference/v1/chat/completions"
+HF_API_URL = "https://router.huggingface.co/v1/chat/completions"
+
+# Tried in order — ":fastest" lets HF auto-pick an available provider for
+# each model. If the first model/provider pairing is temporarily unavailable
+# (HF adds/removes provider mappings fairly often), we fall through to the
+# next rather than surfacing a dead end.
+MODEL_CANDIDATES = [
+    "openai/gpt-oss-120b:fastest",
+    "Qwen/Qwen2.5-7B-Instruct:fastest",
+    "microsoft/Phi-3-mini-4k-instruct:fastest",
+]
 
 SYSTEM_PROMPT = (
     "You are Saqr, an assistant specialized in data analysis, report "
@@ -57,6 +66,18 @@ def _build_system_prompt(data_context: dict = None) -> str:
     )
 
 
+def _call_model(model: str, messages: list) -> requests.Response:
+    return requests.post(
+        HF_API_URL,
+        headers={
+            "Authorization": f"Bearer {HF_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={"model": model, "messages": messages, "max_tokens": 400, "temperature": 0.7},
+        timeout=60,
+    )
+
+
 def chat(message: str, model: str = None, history=None, data_context: dict = None) -> str:
     """
     Send a message to the free Hugging Face router API and return its reply.
@@ -79,33 +100,36 @@ def chat(message: str, model: str = None, history=None, data_context: dict = Non
             messages.append({"role": role, "content": turn["content"]})
     messages.append({"role": "user", "content": message})
 
-    try:
-        resp = requests.post(
-            HF_API_URL,
-            headers={
-                "Authorization": f"Bearer {HF_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model or DEFAULT_MODEL,
-                "messages": messages,
-                "max_tokens": 400,
-                "temperature": 0.7,
-            },
-            timeout=60,
-        )
+    candidates = [model] if model else MODEL_CANDIDATES
+    last_error = None
+
+    for candidate_model in candidates:
+        try:
+            resp = _call_model(candidate_model, messages)
+        except requests.exceptions.RequestException as e:
+            last_error = f"Error talking to the hosted chat model: {e}"
+            continue
+
         if resp.status_code == 403:
-            return (
-                "⚠️ 403 Forbidden from the chat model. This usually means either: "
-                "(1) your HF token doesn't have 'Inference Providers' permission — "
-                "check huggingface.co/settings/tokens and make sure that's enabled, or "
-                "(2) the model requires accepting a license on its Hugging Face page first. "
-                "Data analysis, report, PPT, and solver tools still work without this."
+            last_error = (
+                "403 Forbidden. Your HF token likely doesn't have 'Inference Providers' "
+                "permission — go to huggingface.co/settings/tokens, create a Fine-grained "
+                "token, and check 'Make calls to Inference Providers' under the Inference section."
             )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except requests.exceptions.RequestException as e:
-        return f"⚠️ Error talking to the hosted chat model: {e}"
-    except (KeyError, IndexError, ValueError):
-        return "⚠️ Unexpected response from the chat model. Try again in a moment."
+            continue
+        if resp.status_code in (400, 404):
+            last_error = f"{resp.status_code} error on model '{candidate_model}' — trying the next option."
+            continue
+        if not resp.ok:
+            last_error = f"{resp.status_code} error from the chat model."
+            continue
+
+        try:
+            data = resp.json()
+            return data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, ValueError):
+            last_error = "Unexpected response format from the chat model."
+            continue
+
+    return f"⚠️ {last_error or 'All chat models are temporarily unavailable — try again shortly.'} " \
+           f"Data analysis, report, PPT, and solver tools still work without this."
