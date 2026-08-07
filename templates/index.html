@@ -85,6 +85,47 @@
         <h2>Charts</h2>
         <div id="chartsGrid" class="charts-grid"></div>
       </div>
+
+      <div class="result-block">
+        <h2>Build your own chart</h2>
+        <p class="chart-builder-hint">Pick columns and a chart type — like inserting a custom chart in Excel.</p>
+        <div class="chart-builder">
+          <div class="cb-row">
+            <div class="cb-field">
+              <label>Chart type</label>
+              <select id="cbType">
+                <option value="bar">Bar</option>
+                <option value="column">Column</option>
+                <option value="line">Line</option>
+                <option value="area">Area</option>
+                <option value="pie">Pie</option>
+                <option value="scatter">Scatter</option>
+                <option value="horizontal_bar">Horizontal bar</option>
+              </select>
+            </div>
+            <div class="cb-field">
+              <label>X axis / labels</label>
+              <select id="cbX"></select>
+            </div>
+            <div class="cb-field">
+              <label>Y column(s)</label>
+              <select id="cbY" multiple size="3"></select>
+            </div>
+          </div>
+          <div class="cb-row">
+            <div class="cb-field" style="flex:1;">
+              <label>Title (optional)</label>
+              <input type="text" id="cbTitle" placeholder="e.g. Revenue by Month">
+            </div>
+            <div class="cb-field">
+              <label>Color</label>
+              <input type="color" id="cbColor" value="#4F46E5">
+            </div>
+          </div>
+          <button class="run-btn" id="cbGenerateBtn">Generate chart</button>
+          <div id="cbOutput" class="cb-output"></div>
+        </div>
+      </div>
     </div>
   </section>
 

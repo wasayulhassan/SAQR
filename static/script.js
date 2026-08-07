@@ -169,7 +169,59 @@ function renderAnalysis(data){
     img.src = url + "?t=" + Date.now();
     chartsGrid.appendChild(img);
   });
+
+  // chart builder column dropdowns
+  populateChartBuilderColumns(data.summary.columns);
 }
+
+function populateChartBuilderColumns(columns){
+  const xSelect = document.getElementById("cbX");
+  const ySelect = document.getElementById("cbY");
+  xSelect.innerHTML = "";
+  ySelect.innerHTML = "";
+  columns.forEach(col => {
+    const optX = document.createElement("option");
+    optX.value = col; optX.textContent = col;
+    xSelect.appendChild(optX);
+
+    const optY = document.createElement("option");
+    optY.value = col; optY.textContent = col;
+    ySelect.appendChild(optY);
+  });
+}
+
+document.getElementById("cbGenerateBtn").addEventListener("click", async () => {
+  const output = document.getElementById("cbOutput");
+  const chartType = document.getElementById("cbType").value;
+  const xCol = document.getElementById("cbX").value;
+  const yCols = Array.from(document.getElementById("cbY").selectedOptions).map(o => o.value);
+  const title = document.getElementById("cbTitle").value;
+  const color = document.getElementById("cbColor").value;
+
+  if(!xCol || yCols.length === 0){
+    output.innerHTML = '<span class="cb-error">Pick an X column and at least one Y column.</span>';
+    return;
+  }
+
+  output.textContent = "generating…";
+  try{
+    const res = await fetch("/api/chart", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({chart_type: chartType, x_col: xCol, y_cols: yCols, title, color})
+    });
+    const data = await res.json();
+    if(!data.ok){
+      output.innerHTML = `<span class="cb-error">${data.error}</span>`;
+      return;
+    }
+    output.innerHTML = `
+      <img src="${data.url}?t=${Date.now()}">
+      <br><a class="cb-download" href="${data.url}" download>Download image</a>
+    `;
+  }catch(err){
+    output.innerHTML = `<span class="cb-error">Request failed: ${err}</span>`;
+  }
+});
 
 // ---------- solve ----------
 const solveTabs = document.querySelectorAll(".solve-tab");

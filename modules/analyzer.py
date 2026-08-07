@@ -19,14 +19,96 @@ CHART_DIR = os.path.join(os.path.dirname(__file__), "..", "static", "charts")
 os.makedirs(CHART_DIR, exist_ok=True)
 
 
+def _detect_header_row(raw: pd.DataFrame, max_scan: int = 15) -> int:
+    """Scan the first `max_scan` rows and guess which one is the real header —
+    the row most likely to be all-text labels rather than data."""
+    best_idx, best_score = 0, -1
+    scan_rows = min(max_scan, len(raw))
+    for i in range(scan_rows):
+        row = raw.iloc[i]
+        non_null = row.notna().sum()
+        text_like = row.apply(lambda v: isinstance(v, str) and v.strip() != "").sum()
+        numeric_like = row.apply(lambda v: isinstance(v, (int, float)) and not pd.isna(v)).sum()
+        # Header rows: mostly text, few/no numbers, reasonably full row
+        score = (text_like * 2) - numeric_like + non_null
+        if score > best_score:
+            best_score = score
+            best_idx = i
+    return best_idx
+
+
+def _clean_messy_dataframe(raw: pd.DataFrame) -> pd.DataFrame:
+    """Take a raw, header-less read and turn it into a clean, typed DataFrame:
+    finds the real header row, drops junk rows/columns, strips whitespace,
+    and coerces mostly-numeric text columns to actual numbers."""
+    if raw.empty:
+        return raw
+
+    header_idx = _detect_header_row(raw)
+    columns = raw.iloc[header_idx].fillna("").astype(str).str.strip()
+    columns = [c if c else f"column_{i}" for i, c in enumerate(columns)]
+
+    data = raw.iloc[header_idx + 1:].copy()
+    data.columns = columns
+
+    # Drop fully-empty rows/columns (common in exported/messy sheets)
+    data = data.dropna(axis=0, how="all").dropna(axis=1, how="all")
+    data = data.reset_index(drop=True)
+
+    # Strip whitespace from string cells
+    for col in data.columns:
+        if data[col].dtype == object:
+            data[col] = data[col].apply(lambda v: v.strip() if isinstance(v, str) else v)
+
+    # Coerce columns that are mostly numeric (allowing some stray text/blank
+    # cells) into real numeric dtype, so stats/trends/anomalies pick them up
+    for col in data.columns:
+        if data[col].dtype == object:
+            coerced = pd.to_numeric(
+                data[col].astype(str).str.replace(",", "", regex=False).str.strip(),
+                errors="coerce",
+            )
+            non_null_ratio = coerced.notna().sum() / max(data[col].notna().sum(), 1)
+            if non_null_ratio > 0.7:
+                data[col] = coerced
+
+    # De-duplicate any repeated column names (messy exports sometimes have these)
+    seen = {}
+    new_cols = []
+    for c in data.columns:
+        if c in seen:
+            seen[c] += 1
+            new_cols.append(f"{c}_{seen[c]}")
+        else:
+            seen[c] = 0
+            new_cols.append(c)
+    data.columns = new_cols
+
+    return data
+
+
 def load_file(filepath: str) -> pd.DataFrame:
+    """Load a CSV or Excel file — robust to messy real-world exports:
+    junk rows above the header, blank rows/columns, numbers stored as text
+    with stray commas, multiple sheets (first non-empty sheet is used)."""
     ext = filepath.lower().rsplit(".", 1)[-1]
+
     if ext == "csv":
-        return pd.read_csv(filepath)
+        raw = pd.read_csv(filepath, header=None, dtype=object)
     elif ext in ("xlsx", "xls"):
-        return pd.read_excel(filepath)
+        xls = pd.ExcelFile(filepath)
+        raw = None
+        for sheet_name in xls.sheet_names:
+            candidate = pd.read_excel(xls, sheet_name=sheet_name, header=None, dtype=object)
+            if not candidate.dropna(how="all").empty:
+                raw = candidate
+                break
+        if raw is None:
+            raw = pd.read_excel(xls, sheet_name=xls.sheet_names[0], header=None, dtype=object)
     else:
         raise ValueError(f"Unsupported file type: .{ext}")
+
+    return _clean_messy_dataframe(raw)
 
 
 def summary_stats(df: pd.DataFrame) -> dict:

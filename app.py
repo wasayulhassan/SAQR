@@ -5,7 +5,7 @@ import traceback
 from flask import Flask, request, jsonify, render_template, send_file
 
 sys.path.insert(0, os.path.dirname(__file__))
-from modules import chatbot, analyzer, solver, report_gen, ppt_gen
+from modules import chatbot, analyzer, solver, report_gen, ppt_gen, chart_builder
 
 app = Flask(__name__)
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
@@ -20,12 +20,29 @@ def index():
     return render_template("index.html")
 
 
+def _build_data_context():
+    """Compact summary of the currently loaded dataset, if any, for the
+    chatbot to ground its answers in — not the raw rows, just shape/stats."""
+    if "data" not in LAST_ANALYSIS:
+        return None
+    a = LAST_ANALYSIS["data"]
+    return {
+        "rows": a["summary"]["rows"],
+        "columns": a["summary"]["columns"],
+        "numeric_columns": a["summary"]["numeric_columns"],
+        "trends": a["trends"],
+        "anomaly_counts": {
+            col: len(info["outlier_row_indices"]) for col, info in a["anomalies"].items()
+        },
+    }
+
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     data = request.get_json(force=True)
     message = data.get("message", "")
     history = data.get("history", [])
-    reply = chatbot.chat(message, history=history)
+    reply = chatbot.chat(message, history=history, data_context=_build_data_context())
     return jsonify({"reply": reply})
 
 
@@ -92,6 +109,23 @@ def api_solve():
     data = request.get_json(force=True)
     problem_type = data.pop("problem_type", None)
     result = solver.solve(problem_type, **data)
+    return jsonify(result)
+
+
+@app.route("/api/chart", methods=["POST"])
+def api_chart():
+    if "data" not in LAST_ANALYSIS:
+        return jsonify({"ok": False, "error": "Upload and analyze a file first"}), 400
+    data = request.get_json(force=True)
+    df = LAST_ANALYSIS["data"]["dataframe"]
+    result = chart_builder.build_chart(
+        df,
+        chart_type=data.get("chart_type", ""),
+        x_col=data.get("x_col", ""),
+        y_cols=data.get("y_cols", []),
+        title=data.get("title", ""),
+        color=data.get("color") or None,
+    )
     return jsonify(result)
 
 
