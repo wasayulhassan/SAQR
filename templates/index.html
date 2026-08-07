@@ -5,191 +5,275 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SAQR — Local Analysis Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;600;700&family=Noto+Nastaliq+Urdu:wght@400;600;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
-<div class="scanline"></div>
-
 <header class="topbar">
   <div class="brand">
-    <span class="brand-mark">◈</span>
-    <span class="brand-name">SAQR</span>
-    <span class="brand-sub">صقر · local analysis console</span>
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2 14L11 5L14 8L9 13H16L22 7L20 15L12 19L8 15L2 14Z" fill="white"/>
+      </svg>
+    </div>
+    <div class="brand-text">
+      <span class="brand-name">SAQR<span style="color:var(--red)">.</span></span>
+      <span class="brand-sub">صقر · local analysis console</span>
+    </div>
   </div>
-  <div class="status-strip" id="statusStrip">
-    <div class="status-chip" id="ollamaStatus"><span class="dot"></span>LLM: checking…</div>
-    <div class="status-chip"><span class="dot dot-static"></span>engine: hosted (free)</div>
+  <div class="top-right">
+    <div class="lang-switch" id="langSwitch">
+      <button data-lang="en" class="active">EN</button>
+      <button data-lang="ar">عربي</button>
+      <button data-lang="ur">اردو</button>
+      <button data-lang="hi">हिं</button>
+    </div>
+    <div class="status-strip" id="statusStrip">
+      <div class="status-chip" id="ollamaStatus"><span class="dot"></span>LLM: checking…</div>
+      <div class="status-chip"><span class="dot dot-static"></span><span data-i18n="engine_free">engine: hosted (free)</span></div>
+    </div>
   </div>
 </header>
 
-<main class="grid">
+<div class="layout">
 
-  <!-- LEFT: Tool rail -->
-  <nav class="rail">
-    <button class="rail-btn active" data-panel="chat">01 · Chat</button>
-    <button class="rail-btn" data-panel="analyze">02 · Analyze</button>
-    <button class="rail-btn" data-panel="solve">03 · Solve</button>
-    <button class="rail-btn" data-panel="export">04 · Export</button>
+  <!-- LEFT: sidebar nav -->
+  <nav class="sidebar">
+    <div class="nav-section-label" data-i18n="nav_main">Main</div>
+    <button class="rail-btn active" data-panel="dashboard"><span data-i18n="nav_dashboard">Dashboard</span></button>
+    <button class="rail-btn" data-panel="chat"><span data-i18n="nav_chat">Chat</span></button>
+    <button class="rail-btn" data-panel="analyze"><span data-i18n="nav_analyze">Analyze Data</span></button>
+    <button class="rail-btn" data-panel="solve"><span data-i18n="nav_solve">Problem Solver</span></button>
+    <div class="nav-section-label" data-i18n="nav_output">Output</div>
+    <button class="rail-btn" data-panel="export"><span data-i18n="nav_export">Reports &amp; Decks</span></button>
   </nav>
 
-  <!-- PANEL: Chat -->
-  <section class="panel active" id="panel-chat">
-    <div class="panel-head">
-      <h1>General reasoning</h1>
-      <p>Ask anything. Backed by a local model — no data leaves this machine.</p>
-    </div>
-    <div class="chat-window" id="chatWindow">
-      <div class="msg msg-bot">
-        <span class="msg-tag">SAQR</span>
-        Console online. Upload a dataset in <b>Analyze</b>, run a calculation in <b>Solve</b>, or just ask me something here.
-      </div>
-    </div>
-    <form class="chat-input-row" id="chatForm">
-      <input type="text" id="chatInput" placeholder="Ask SAQR…" autocomplete="off">
-      <button type="submit">Send</button>
-    </form>
-  </section>
+  <main class="content">
 
-  <!-- PANEL: Analyze -->
-  <section class="panel" id="panel-analyze">
-    <div class="panel-head">
-      <h1>Data analysis</h1>
-      <p>Upload a CSV or Excel file for stats, trend detection, and anomaly flags.</p>
-    </div>
-
-    <div class="dropzone" id="dropzone">
-      <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" hidden>
-      <div class="dropzone-inner">
-        <span class="dz-icon">⇪</span>
-        <p><b>Drop a file</b> or click to browse</p>
-        <p class="dz-hint">.csv · .xlsx · .xls</p>
-      </div>
-    </div>
-
-    <div id="analysisResults" class="analysis-results hidden">
-      <div class="result-block">
-        <h2>Overview</h2>
-        <div id="overviewStats" class="stat-row"></div>
-      </div>
-      <div class="result-block">
-        <h2>Trends</h2>
-        <ul id="trendsList" class="data-list"></ul>
-      </div>
-      <div class="result-block">
-        <h2>Anomalies</h2>
-        <ul id="anomaliesList" class="data-list"></ul>
-      </div>
-      <div class="result-block">
-        <h2>Charts</h2>
-        <div id="chartsGrid" class="charts-grid"></div>
-      </div>
-
-      <div class="result-block">
-        <h2>Build your own chart</h2>
-        <p class="chart-builder-hint">Pick columns and a chart type — like inserting a custom chart in Excel.</p>
-        <div class="chart-builder">
-          <div class="cb-row">
-            <div class="cb-field">
-              <label>Chart type</label>
-              <select id="cbType">
-                <option value="bar">Bar</option>
-                <option value="column">Column</option>
-                <option value="line">Line</option>
-                <option value="area">Area</option>
-                <option value="pie">Pie</option>
-                <option value="scatter">Scatter</option>
-                <option value="horizontal_bar">Horizontal bar</option>
-              </select>
-            </div>
-            <div class="cb-field">
-              <label>X axis / labels</label>
-              <select id="cbX"></select>
-            </div>
-            <div class="cb-field">
-              <label>Y column(s)</label>
-              <select id="cbY" multiple size="3"></select>
-            </div>
-          </div>
-          <div class="cb-row">
-            <div class="cb-field" style="flex:1;">
-              <label>Title (optional)</label>
-              <input type="text" id="cbTitle" placeholder="e.g. Revenue by Month">
-            </div>
-            <div class="cb-field">
-              <label>Color</label>
-              <input type="color" id="cbColor" value="#4F46E5">
-            </div>
-          </div>
-          <button class="run-btn" id="cbGenerateBtn">Generate chart</button>
-          <div id="cbOutput" class="cb-output"></div>
+    <!-- PANEL: Dashboard -->
+    <section class="panel active" id="panel-dashboard">
+      <div class="panel-head">
+        <div>
+          <h1 data-i18n="dash_title">Welcome to SAQR</h1>
+          <p data-i18n="dash_subtitle">Your local, free data analysis and problem-solving console.</p>
         </div>
       </div>
-    </div>
-  </section>
 
-  <!-- PANEL: Solve -->
-  <section class="panel" id="panel-solve">
-    <div class="panel-head">
-      <h1>Problem solving</h1>
-      <p>Equations, calculus, and linear optimization — computed exactly, not guessed.</p>
-    </div>
-
-    <div class="solve-tabs">
-      <button class="solve-tab active" data-mode="equation">Solve equation</button>
-      <button class="solve-tab" data-mode="simplify">Simplify</button>
-      <button class="solve-tab" data-mode="derivative">Derivative</button>
-      <button class="solve-tab" data-mode="integral">Integral</button>
-      <button class="solve-tab" data-mode="optimize">Optimize (LP)</button>
-    </div>
-
-    <div class="solve-body" id="solveSimple">
-      <label>Expression <span class="hint">e.g. x**2 - 4 = 0</span></label>
-      <input type="text" id="solveExpr" placeholder="x**2 - 4 = 0">
-      <label>Variable</label>
-      <input type="text" id="solveVar" value="x" style="max-width:120px;">
-      <button class="run-btn" id="solveRunBtn">Compute</button>
-      <div class="solve-output" id="solveOutput"></div>
-    </div>
-
-    <div class="solve-body hidden" id="solveOptimize">
-      <label>Objective coefficients (comma-sep, e.g. maximize 3x + 5y → 3,5)</label>
-      <input type="text" id="optC" placeholder="3,5">
-      <label>Inequality constraint matrix rows, one per line (A·x ≤ b) — format: a,b | rhs</label>
-      <textarea id="optA" rows="3" placeholder="1,2 | 10&#10;3,1 | 15"></textarea>
-      <button class="run-btn" id="optimizeRunBtn">Solve LP</button>
-      <div class="solve-output" id="optimizeOutput"></div>
-    </div>
-  </section>
-
-  <!-- PANEL: Export -->
-  <section class="panel" id="panel-export">
-    <div class="panel-head">
-      <h1>Report &amp; deck export</h1>
-      <p>Turn your last analysis into a Word report or PowerPoint deck.</p>
-    </div>
-    <div class="export-grid">
-      <div class="export-card">
-        <h2>Word report</h2>
-        <p>Overview, statistics table, trends, anomalies, and charts.</p>
-        <input type="text" id="reportTitle" placeholder="Report title" value="Data Analysis Report">
-        <button class="run-btn" id="reportBtn">Generate .docx</button>
-        <div class="export-status" id="reportStatus"></div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="label" data-i18n="stat_engine">Chat Engine</div>
+          <div class="value" data-i18n="stat_engine_val">Local (free)</div>
+        </div>
+        <div class="stat-card">
+          <div class="label" data-i18n="stat_privacy">Data Privacy</div>
+          <div class="value" data-i18n="stat_privacy_val">Stays on device</div>
+        </div>
+        <div class="stat-card">
+          <div class="label" data-i18n="stat_formats">File Formats</div>
+          <div class="value">CSV · XLSX · XLS</div>
+        </div>
+        <div class="stat-card">
+          <div class="label" data-i18n="stat_exports">Export Formats</div>
+          <div class="value">DOCX · PPTX</div>
+        </div>
       </div>
-      <div class="export-card">
-        <h2>PowerPoint deck</h2>
-        <p>Title slide, overview, trends, anomalies, and chart slides.</p>
-        <input type="text" id="pptTitle" placeholder="Deck title" value="Data Analysis">
-        <button class="run-btn" id="pptBtn">Generate .pptx</button>
-        <div class="export-status" id="pptStatus"></div>
+
+      <div class="quick-actions">
+        <div class="qa-card" data-goto="chat">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="M21 12c0 4.4-4 8-9 8a10 10 0 0 1-3-.4L3 21l1.5-4A7.6 7.6 0 0 1 3 12c0-4.4 4-8 9-8s9 3.6 9 8Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="t" data-i18n="qa1_t">Ask a Question</div>
+          <div class="d" data-i18n="qa1_d">General reasoning, chat with SAQR</div>
+        </div>
+        <div class="qa-card" data-goto="analyze">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke="white" stroke-width="2" stroke-linecap="round"/></svg></div>
+          <div class="t" data-i18n="qa2_t">Analyze Data</div>
+          <div class="d" data-i18n="qa2_d">Upload a CSV or Excel file</div>
+        </div>
+        <div class="qa-card" data-goto="solve">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="white" stroke-width="2"/><path d="M9 12l2 2 4-4" stroke="white" stroke-width="2" stroke-linecap="round"/></svg></div>
+          <div class="t" data-i18n="qa3_t">Solve a Problem</div>
+          <div class="d" data-i18n="qa3_d">Math, stats, or optimization</div>
+        </div>
+        <div class="qa-card" data-goto="export">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="M4 4h16v16H4z" stroke="white" stroke-width="2"/><path d="M8 9h8M8 13h5" stroke="white" stroke-width="2" stroke-linecap="round"/></svg></div>
+          <div class="t" data-i18n="qa4_t">Export a Report</div>
+          <div class="d" data-i18n="qa4_d">Turn your analysis into DOCX/PPTX</div>
+        </div>
       </div>
-    </div>
-    <p class="export-note" id="exportNote">Run an analysis in the <b>Analyze</b> panel first — exports are built from your last uploaded dataset.</p>
-  </section>
 
-</main>
+      <div class="about-panel">
+        <h3 data-i18n="about_title">About this console</h3>
+        <p data-i18n="about_body">SAQR runs entirely on your own machine — data analysis, report generation, presentation building, and math/logic solving, with no data leaving this device. The chat feature uses a lightweight local model to stay free.</p>
+      </div>
+    </section>
 
+    <!-- PANEL: Chat -->
+    <section class="panel" id="panel-chat">
+      <div class="panel-head">
+        <div>
+          <h1 data-i18n="chat_h1">General reasoning</h1>
+          <p data-i18n="chat_p">Ask anything. Backed by a local model — no data leaves this machine.</p>
+        </div>
+      </div>
+      <div class="chat-window" id="chatWindow">
+        <div class="msg msg-bot">
+          <span class="msg-tag">SAQR</span>
+          <span data-i18n="chat_intro">Console online. Upload a dataset in Analyze, run a calculation in Solve, or just ask me something here.</span>
+        </div>
+      </div>
+      <form class="chat-input-row" id="chatForm">
+        <input type="text" id="chatInput" data-i18n-placeholder="chat_placeholder" placeholder="Ask SAQR…" autocomplete="off">
+        <button type="submit" data-i18n="send_btn">Send</button>
+      </form>
+    </section>
+
+    <!-- PANEL: Analyze -->
+    <section class="panel" id="panel-analyze">
+      <div class="panel-head">
+        <div>
+          <h1 data-i18n="analyze_h1">Data analysis</h1>
+          <p data-i18n="analyze_p">Upload a CSV or Excel file for stats, trend detection, and anomaly flags.</p>
+        </div>
+      </div>
+
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" hidden>
+        <div class="dropzone-inner">
+          <span class="dz-icon">⇪</span>
+          <p><b data-i18n="drop_file">Drop a file</b> <span data-i18n="or_click">or click to browse</span></p>
+          <p class="dz-hint">.csv · .xlsx · .xls</p>
+        </div>
+      </div>
+
+      <div id="analysisResults" class="analysis-results hidden">
+        <div class="result-block">
+          <h2 data-i18n="overview_h2">Overview</h2>
+          <div id="overviewStats" class="stat-row"></div>
+        </div>
+        <div class="result-block">
+          <h2 data-i18n="trends_h2">Trends</h2>
+          <ul id="trendsList" class="data-list"></ul>
+        </div>
+        <div class="result-block">
+          <h2 data-i18n="anomalies_h2">Anomalies</h2>
+          <ul id="anomaliesList" class="data-list"></ul>
+        </div>
+        <div class="result-block">
+          <h2 data-i18n="charts_h2">Charts</h2>
+          <div id="chartsGrid" class="charts-grid"></div>
+        </div>
+
+        <div class="result-block">
+          <h2 data-i18n="build_chart_h2">Build your own chart</h2>
+          <p class="chart-builder-hint" data-i18n="build_chart_hint">Pick columns and a chart type — like inserting a custom chart in Excel.</p>
+          <div class="chart-builder">
+            <div class="cb-row">
+              <div class="cb-field">
+                <label data-i18n="chart_type_lbl">Chart type</label>
+                <select id="cbType">
+                  <option value="bar">Bar</option>
+                  <option value="column">Column</option>
+                  <option value="line">Line</option>
+                  <option value="area">Area</option>
+                  <option value="pie">Pie</option>
+                  <option value="scatter">Scatter</option>
+                  <option value="horizontal_bar">Horizontal bar</option>
+                </select>
+              </div>
+              <div class="cb-field">
+                <label data-i18n="x_axis_lbl">X axis / labels</label>
+                <select id="cbX"></select>
+              </div>
+              <div class="cb-field">
+                <label data-i18n="y_col_lbl">Y column(s)</label>
+                <select id="cbY" multiple size="3"></select>
+              </div>
+            </div>
+            <div class="cb-row">
+              <div class="cb-field" style="flex:1;">
+                <label data-i18n="title_optional_lbl">Title (optional)</label>
+                <input type="text" id="cbTitle" data-i18n-placeholder="title_ph" placeholder="e.g. Revenue by Month">
+              </div>
+              <div class="cb-field">
+                <label data-i18n="color_lbl">Color</label>
+                <input type="color" id="cbColor" value="#E4002B">
+              </div>
+            </div>
+            <button class="run-btn" id="cbGenerateBtn" data-i18n="generate_chart_btn">Generate chart</button>
+            <div id="cbOutput" class="cb-output"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL: Solve -->
+    <section class="panel" id="panel-solve">
+      <div class="panel-head">
+        <div>
+          <h1 data-i18n="solve_h1">Problem solving</h1>
+          <p data-i18n="solve_p">Equations, calculus, and linear optimization — computed exactly, not guessed.</p>
+        </div>
+      </div>
+
+      <div class="solve-tabs">
+        <button class="solve-tab active" data-mode="equation" data-i18n="tab_equation">Solve equation</button>
+        <button class="solve-tab" data-mode="simplify" data-i18n="tab_simplify">Simplify</button>
+        <button class="solve-tab" data-mode="derivative" data-i18n="tab_derivative">Derivative</button>
+        <button class="solve-tab" data-mode="integral" data-i18n="tab_integral">Integral</button>
+        <button class="solve-tab" data-mode="optimize" data-i18n="tab_optimize">Optimize (LP)</button>
+      </div>
+
+      <div class="solve-body" id="solveSimple">
+        <label><span data-i18n="expression_lbl">Expression</span> <span class="hint">e.g. x**2 - 4 = 0</span></label>
+        <input type="text" id="solveExpr" placeholder="x**2 - 4 = 0">
+        <label data-i18n="variable_lbl">Variable</label>
+        <input type="text" id="solveVar" value="x" style="max-width:120px;">
+        <button class="run-btn" id="solveRunBtn" data-i18n="compute_btn">Compute</button>
+        <div class="solve-output" id="solveOutput"></div>
+      </div>
+
+      <div class="solve-body hidden" id="solveOptimize">
+        <label data-i18n="obj_coef_lbl">Objective coefficients (comma-sep, e.g. maximize 3x + 5y → 3,5)</label>
+        <input type="text" id="optC" placeholder="3,5">
+        <label data-i18n="constraint_lbl">Inequality constraint matrix rows, one per line (A·x ≤ b) — format: a,b | rhs</label>
+        <textarea id="optA" rows="3" placeholder="1,2 | 10&#10;3,1 | 15"></textarea>
+        <button class="run-btn" id="optimizeRunBtn" data-i18n="solve_lp_btn">Solve LP</button>
+        <div class="solve-output" id="optimizeOutput"></div>
+      </div>
+    </section>
+
+    <!-- PANEL: Export -->
+    <section class="panel" id="panel-export">
+      <div class="panel-head">
+        <div>
+          <h1 data-i18n="export_h1">Report &amp; deck export</h1>
+          <p data-i18n="export_p">Turn your last analysis into a Word report or PowerPoint deck.</p>
+        </div>
+      </div>
+      <div class="export-grid">
+        <div class="export-card">
+          <h2 data-i18n="word_report_h2">Word report</h2>
+          <p data-i18n="word_report_p">Overview, statistics table, trends, anomalies, and charts.</p>
+          <input type="text" id="reportTitle" data-i18n-placeholder="report_title_ph" placeholder="Report title" value="Data Analysis Report">
+          <button class="run-btn" id="reportBtn" data-i18n="gen_docx_btn">Generate .docx</button>
+          <div class="export-status" id="reportStatus"></div>
+        </div>
+        <div class="export-card">
+          <h2 data-i18n="ppt_deck_h2">PowerPoint deck</h2>
+          <p data-i18n="ppt_deck_p">Title slide, overview, trends, anomalies, and chart slides.</p>
+          <input type="text" id="pptTitle" data-i18n-placeholder="deck_title_ph" placeholder="Deck title" value="Data Analysis">
+          <button class="run-btn" id="pptBtn" data-i18n="gen_pptx_btn">Generate .pptx</button>
+          <div class="export-status" id="pptStatus"></div>
+        </div>
+      </div>
+      <p class="export-note" id="exportNote" data-i18n="export_note">Run an analysis in the Analyze panel first — exports are built from your last uploaded dataset.</p>
+    </section>
+
+  </main>
+</div>
+
+<script src="{{ url_for('static', filename='i18n.js') }}"></script>
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
