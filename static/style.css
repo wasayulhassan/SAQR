@@ -249,6 +249,39 @@ body.rtl .msg-body ul, body.rtl .msg-body ol{ padding-left:0; padding-right:20px
 }
 .chat-file-chip .chip-remove:hover{ color:var(--white); border-color:var(--red); background:var(--red); }
 
+.chip-ppt-btn{
+  flex-shrink:0; display:flex; align-items:center; gap:6px;
+  background:var(--red); color:var(--white); border:none;
+  padding:8px 13px; border-radius:8px; font-family:inherit; font-size:12px; font-weight:700;
+  cursor:pointer; white-space:nowrap; transition:filter .15s ease;
+}
+.chip-ppt-btn:hover{ filter:brightness(1.12); }
+.chip-ppt-btn svg{ width:14px; height:14px; flex-shrink:0; }
+
+/* ---------- presentation wizard ---------- */
+.wizard-choices{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.wizard-choice-btn{
+  background:var(--black-soft); border:1px solid var(--line); color:var(--off-white);
+  padding:7px 14px; border-radius:999px; font-family:inherit; font-size:12.5px; font-weight:600;
+  cursor:pointer; transition:.15s ease;
+}
+.wizard-choice-btn:hover{ border-color:var(--red); color:var(--white); }
+.wizard-choice-btn.is-skip, .wizard-choice-btn.is-cancel{ color:var(--muted); }
+.wizard-choice-btn:disabled{ opacity:.5; cursor:default; }
+
+.ppt-result-card{
+  background:var(--panel-2); border:1px solid var(--line); border-radius:12px;
+  padding:14px; margin-top:10px;
+}
+.ppt-result-card .ppt-meta{ display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); margin-bottom:10px; }
+.ppt-result-card .ppt-meta b{ color:var(--white); }
+.ppt-result-card a.ppt-download-btn{
+  display:inline-flex; align-items:center; gap:8px;
+  background:var(--red); color:var(--white); text-decoration:none;
+  padding:9px 16px; border-radius:9px; font-size:12.5px; font-weight:700;
+}
+.ppt-result-card a.ppt-download-btn:hover{ filter:brightness(1.12); }
+
 .msg-file{ display:flex; align-items:center; gap:8px; }
 .msg-file .chip-icon{ font-size:13px; }
 

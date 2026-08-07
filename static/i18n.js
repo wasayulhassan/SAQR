@@ -46,7 +46,32 @@ const SAQR_TRANSLATIONS = {
     deck_title_ph: "Deck title", gen_pptx_btn: "Generate .pptx",
     export_note: "Run an analysis in the Analyze panel first — exports are built from your last uploaded dataset.",
     llm_checking: "LLM: checking…", llm_online: "LLM: online", llm_offline: "LLM: offline", llm_unknown: "LLM: unknown",
-    you_tag: "YOU"
+    you_tag: "YOU",
+    attach_file_title: "Attach a file", remove_attachment_title: "Remove attachment",
+    chat_file_hint: "Attach a CSV, Excel, PDF, Word, or text file to ask SAQR anything about it.",
+    uploading_file: "Uploading {filename}…",
+    file_attached_msg: "📎 Attached {filename} ({meta}). Ask me anything about it.",
+    file_attach_error: "Couldn't attach that file: {error}",
+    file_removed_msg: "📎 Removed {filename} from this conversation.",
+    create_ppt_btn: "Create Presentation", create_ppt_btn_title: "Create a custom presentation from this file",
+    wiz_need_file: "Attach a file first, then I can build a presentation from it.",
+    wiz_q_purpose: "What's this presentation for, and who's it for?",
+    wiz_q_purpose_placeholder: "e.g. Class assignment on climate change, for my professor",
+    wiz_q_tone: "What tone should it have?",
+    wiz_tone_formal: "Formal", wiz_tone_casual: "Casual", wiz_tone_academic: "Academic", wiz_tone_creative: "Creative",
+    wiz_q_slides: "How many slides?",
+    wiz_slides_5: "5", wiz_slides_8: "8", wiz_slides_12: "12", wiz_slides_auto: "Let SAQR decide",
+    wiz_q_style: "Pick a visual style",
+    wiz_style_minimal: "Minimal", wiz_style_bold: "Bold & colorful", wiz_style_classic: "Classic", wiz_style_surprise: "Surprise me",
+    wiz_q_extra: "Anything else you want included or avoided? (optional)",
+    wiz_q_extra_placeholder: "Type it, or tap Skip",
+    wiz_skip: "Skip", wiz_cancel: "Cancel",
+    wiz_cancelled_msg: "No problem — presentation setup cancelled.",
+    wiz_pick_option: "Please pick one of the options above (or type it exactly).",
+    wiz_generating: "Designing your presentation — this can take a minute or two…",
+    wiz_error: "Couldn't generate the presentation: {error}",
+    wiz_download_ready: "Your presentation is ready.",
+    wiz_theme_label: "Theme", wiz_slides_label: "Slides", wiz_download_btn: "Download .pptx"
   },
   ar: {
     engine_free: "المحرك: مستضاف (مجاني)",
@@ -89,7 +114,32 @@ const SAQR_TRANSLATIONS = {
     deck_title_ph: "عنوان العرض", gen_pptx_btn: "إنشاء .pptx",
     export_note: "شغّل تحليلاً في لوحة تحليل البيانات أولاً — يتم بناء الملفات المصدَّرة من آخر مجموعة بيانات رفعتها.",
     llm_checking: "النموذج: جارٍ التحقق…", llm_online: "النموذج: متصل", llm_offline: "النموذج: غير متصل", llm_unknown: "النموذج: غير معروف",
-    you_tag: "أنت"
+    you_tag: "أنت",
+    attach_file_title: "إرفاق ملف", remove_attachment_title: "إزالة المرفق",
+    chat_file_hint: "أرفق ملف CSV أو Excel أو PDF أو Word أو نصي لتسأل صقر عنه أي شيء.",
+    uploading_file: "جارٍ رفع {filename}…",
+    file_attached_msg: "📎 تم إرفاق {filename} ({meta}). اسألني عنه أي شيء.",
+    file_attach_error: "تعذّر إرفاق الملف: {error}",
+    file_removed_msg: "📎 تمت إزالة {filename} من هذه المحادثة.",
+    create_ppt_btn: "إنشاء عرض تقديمي", create_ppt_btn_title: "إنشاء عرض تقديمي مخصص من هذا الملف",
+    wiz_need_file: "أرفق ملفًا أولاً، وسأتمكن من بناء عرض تقديمي منه.",
+    wiz_q_purpose: "ما الغرض من هذا العرض التقديمي، ولمن هو موجّه؟",
+    wiz_q_purpose_placeholder: "مثال: واجب دراسي عن تغيّر المناخ، لأستاذي",
+    wiz_q_tone: "ما الأسلوب الذي تريده؟",
+    wiz_tone_formal: "رسمي", wiz_tone_casual: "غير رسمي", wiz_tone_academic: "أكاديمي", wiz_tone_creative: "إبداعي",
+    wiz_q_slides: "كم عدد الشرائح؟",
+    wiz_slides_5: "5", wiz_slides_8: "8", wiz_slides_12: "12", wiz_slides_auto: "دع صقر يقرر",
+    wiz_q_style: "اختر نمطًا بصريًا",
+    wiz_style_minimal: "بسيط", wiz_style_bold: "جريء وملوّن", wiz_style_classic: "كلاسيكي", wiz_style_surprise: "فاجئني",
+    wiz_q_extra: "أي شيء آخر تريد تضمينه أو تجنّبه؟ (اختياري)",
+    wiz_q_extra_placeholder: "اكتبه، أو اضغط تخطّي",
+    wiz_skip: "تخطّي", wiz_cancel: "إلغاء",
+    wiz_cancelled_msg: "لا مشكلة — تم إلغاء إعداد العرض التقديمي.",
+    wiz_pick_option: "الرجاء اختيار أحد الخيارات أعلاه (أو كتابته بالضبط).",
+    wiz_generating: "جارٍ تصميم عرضك التقديمي — قد يستغرق ذلك دقيقة أو دقيقتين…",
+    wiz_error: "تعذّر إنشاء العرض التقديمي: {error}",
+    wiz_download_ready: "عرضك التقديمي جاهز.",
+    wiz_theme_label: "النمط", wiz_slides_label: "الشرائح", wiz_download_btn: "تنزيل .pptx"
   },
   ur: {
     engine_free: "انجن: میزبان (مفت)",
@@ -132,7 +182,32 @@ const SAQR_TRANSLATIONS = {
     deck_title_ph: "پریزنٹیشن کا عنوان", gen_pptx_btn: ".pptx بنائیں",
     export_note: "پہلے تجزیہ کریں پینل میں ایک تجزیہ چلائیں — ایکسپورٹس آپ کے آخری اپ لوڈ شدہ ڈیٹاسیٹ سے بنائی جاتی ہیں۔",
     llm_checking: "LLM: جانچ ہو رہی ہے…", llm_online: "LLM: آن لائن", llm_offline: "LLM: آف لائن", llm_unknown: "LLM: نامعلوم",
-    you_tag: "آپ"
+    you_tag: "آپ",
+    attach_file_title: "فائل منسلک کریں", remove_attachment_title: "منسلکہ ہٹائیں",
+    chat_file_hint: "صقر سے کچھ بھی پوچھنے کے لیے CSV، Excel، PDF، Word، یا ٹیکسٹ فائل منسلک کریں۔",
+    uploading_file: "{filename} اپ لوڈ ہو رہی ہے…",
+    file_attached_msg: "📎 {filename} ({meta}) منسلک کر دی گئی۔ اس کے بارے میں کچھ بھی پوچھیں۔",
+    file_attach_error: "فائل منسلک نہیں ہو سکی: {error}",
+    file_removed_msg: "📎 {filename} کو اس گفتگو سے ہٹا دیا گیا۔",
+    create_ppt_btn: "پریزنٹیشن بنائیں", create_ppt_btn_title: "اس فائل سے ایک اپنی مرضی کی پریزنٹیشن بنائیں",
+    wiz_need_file: "پہلے ایک فائل منسلک کریں، پھر میں اس سے پریزنٹیشن بنا سکوں گا۔",
+    wiz_q_purpose: "یہ پریزنٹیشن کس لیے ہے، اور کس کے لیے ہے؟",
+    wiz_q_purpose_placeholder: "مثلاً: موسمیاتی تبدیلی پر کلاس اسائنمنٹ، اپنے پروفیسر کے لیے",
+    wiz_q_tone: "اس کا انداز کیسا ہونا چاہیے؟",
+    wiz_tone_formal: "رسمی", wiz_tone_casual: "غیر رسمی", wiz_tone_academic: "علمی", wiz_tone_creative: "تخلیقی",
+    wiz_q_slides: "کتنی سلائیڈز؟",
+    wiz_slides_5: "5", wiz_slides_8: "8", wiz_slides_12: "12", wiz_slides_auto: "صقر کو فیصلہ کرنے دیں",
+    wiz_q_style: "ایک بصری انداز منتخب کریں",
+    wiz_style_minimal: "سادہ", wiz_style_bold: "جاندار اور رنگین", wiz_style_classic: "کلاسک", wiz_style_surprise: "مجھے حیران کریں",
+    wiz_q_extra: "کچھ اور جو آپ شامل یا خارج کروانا چاہیں؟ (اختیاری)",
+    wiz_q_extra_placeholder: "لکھیں، یا 'نظر انداز کریں' دبائیں",
+    wiz_skip: "نظر انداز کریں", wiz_cancel: "منسوخ کریں",
+    wiz_cancelled_msg: "کوئی بات نہیں — پریزنٹیشن کی تیاری منسوخ کر دی گئی۔",
+    wiz_pick_option: "براہ کرم اوپر دیے گئے اختیارات میں سے ایک منتخب کریں (یا اسے بعینہ لکھیں)۔",
+    wiz_generating: "آپ کی پریزنٹیشن ڈیزائن کی جا رہی ہے — اس میں ایک سے دو منٹ لگ سکتے ہیں…",
+    wiz_error: "پریزنٹیشن نہیں بن سکی: {error}",
+    wiz_download_ready: "آپ کی پریزنٹیشن تیار ہے۔",
+    wiz_theme_label: "تھیم", wiz_slides_label: "سلائیڈز", wiz_download_btn: ".pptx ڈاؤن لوڈ کریں"
   },
   hi: {
     engine_free: "इंजन: होस्टेड (मुफ़्त)",
@@ -175,7 +250,32 @@ const SAQR_TRANSLATIONS = {
     deck_title_ph: "प्रस्तुति शीर्षक", gen_pptx_btn: ".pptx बनाएं",
     export_note: "पहले विश्लेषण पैनल में एक विश्लेषण चलाएं — एक्सपोर्ट आपके अंतिम अपलोड किए गए डेटासेट से बनाए जाते हैं।",
     llm_checking: "LLM: जाँच हो रही है…", llm_online: "LLM: ऑनलाइन", llm_offline: "LLM: ऑफ़लाइन", llm_unknown: "LLM: अज्ञात",
-    you_tag: "आप"
+    you_tag: "आप",
+    attach_file_title: "फ़ाइल अटैच करें", remove_attachment_title: "अटैचमेंट हटाएं",
+    chat_file_hint: "SAQR से कुछ भी पूछने के लिए एक CSV, Excel, PDF, Word, या टेक्स्ट फ़ाइल अटैच करें।",
+    uploading_file: "{filename} अपलोड हो रही है…",
+    file_attached_msg: "📎 {filename} ({meta}) अटैच की गई। इसके बारे में कुछ भी पूछें।",
+    file_attach_error: "फ़ाइल अटैच नहीं हो सकी: {error}",
+    file_removed_msg: "📎 {filename} को इस बातचीत से हटा दिया गया।",
+    create_ppt_btn: "प्रस्तुति बनाएं", create_ppt_btn_title: "इस फ़ाइल से एक कस्टम प्रस्तुति बनाएं",
+    wiz_need_file: "पहले एक फ़ाइल अटैच करें, फिर मैं उससे प्रस्तुति बना सकूंगा।",
+    wiz_q_purpose: "यह प्रस्तुति किसलिए है, और किसके लिए है?",
+    wiz_q_purpose_placeholder: "जैसे: जलवायु परिवर्तन पर क्लास असाइनमेंट, अपने प्रोफेसर के लिए",
+    wiz_q_tone: "इसका लहजा कैसा होना चाहिए?",
+    wiz_tone_formal: "औपचारिक", wiz_tone_casual: "अनौपचारिक", wiz_tone_academic: "शैक्षणिक", wiz_tone_creative: "रचनात्मक",
+    wiz_q_slides: "कितनी स्लाइड्स?",
+    wiz_slides_5: "5", wiz_slides_8: "8", wiz_slides_12: "12", wiz_slides_auto: "SAQR को तय करने दें",
+    wiz_q_style: "एक विज़ुअल स्टाइल चुनें",
+    wiz_style_minimal: "मिनिमल", wiz_style_bold: "बोल्ड और रंगीन", wiz_style_classic: "क्लासिक", wiz_style_surprise: "मुझे चौंकाएं",
+    wiz_q_extra: "और कुछ जो आप शामिल या बाहर करवाना चाहें? (वैकल्पिक)",
+    wiz_q_extra_placeholder: "लिखें, या 'छोड़ें' दबाएं",
+    wiz_skip: "छोड़ें", wiz_cancel: "रद्द करें",
+    wiz_cancelled_msg: "कोई बात नहीं — प्रस्तुति सेटअप रद्द कर दिया गया।",
+    wiz_pick_option: "कृपया ऊपर दिए गए विकल्पों में से एक चुनें (या उसे बिल्कुल वैसे ही लिखें)।",
+    wiz_generating: "आपकी प्रस्तुति डिज़ाइन की जा रही है — इसमें एक से दो मिनट लग सकते हैं…",
+    wiz_error: "प्रस्तुति नहीं बन सकी: {error}",
+    wiz_download_ready: "आपकी प्रस्तुति तैयार है।",
+    wiz_theme_label: "थीम", wiz_slides_label: "स्लाइड्स", wiz_download_btn: ".pptx डाउनलोड करें"
   }
 };
 
@@ -185,6 +285,17 @@ let SAQR_CURRENT_LANG = localStorage.getItem("saqr_lang") || "en";
 function saqrT(key){
   const dict = SAQR_TRANSLATIONS[SAQR_CURRENT_LANG] || SAQR_TRANSLATIONS.en;
   return dict[key] || SAQR_TRANSLATIONS.en[key] || key;
+}
+
+// Translate + substitute {placeholders}, e.g. saqrFormat("file_attached_msg", {filename:"x.csv", meta:"10 rows"})
+function saqrFormat(key, vars){
+  let str = saqrT(key);
+  if(vars){
+    Object.keys(vars).forEach(k => {
+      str = str.replace(new RegExp("\\{" + k + "\\}", "g"), vars[k]);
+    });
+  }
+  return str;
 }
 
 function saqrApplyLang(lang){
@@ -199,6 +310,10 @@ function saqrApplyLang(lang){
   document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
     const key = el.getAttribute("data-i18n-placeholder");
     el.setAttribute("placeholder", saqrT(key));
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach(el => {
+    const key = el.getAttribute("data-i18n-title");
+    el.setAttribute("title", saqrT(key));
   });
 
   document.body.classList.remove("rtl", "lang-ar", "lang-ur", "lang-hi");

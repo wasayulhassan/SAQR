@@ -138,6 +138,43 @@ chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const message = chatInput.value.trim();
   if(!message) return;
+
+  // ---- presentation wizard interception ----
+  if(ppWizard){
+    if(/^(cancel|stop|nevermind|never mind)$/i.test(message)){
+      chatInput.value = "";
+      addMsg(message, "user");
+      cancelWizard();
+      return;
+    }
+    const step = WIZARD_STEPS[ppWizard.stepIndex];
+    if(step.type === "choice"){
+      const matched = step.choices.find(c =>
+        c.value.toLowerCase() === message.toLowerCase() ||
+        saqrT(c.labelKey).toLowerCase() === message.toLowerCase()
+      );
+      chatInput.value = "";
+      if(matched){
+        handleWizardAnswer(matched.value, saqrT(matched.labelKey));
+      } else {
+        addMsg(message, "user");
+        addMsg(saqrT("wiz_pick_option"), "bot");
+      }
+      return;
+    }
+    // free-text step
+    chatInput.value = "";
+    handleWizardAnswer(message, message);
+    return;
+  }
+
+  if(!ppWizard && attachedChatFile && PRESENTATION_TRIGGER_RE.test(message)){
+    addMsg(message, "user");
+    chatInput.value = "";
+    startWizard();
+    return;
+  }
+
   addMsg(message, "user");
   chatHistory.push({role:"user", content:message});
   chatInput.value = "";
@@ -179,6 +216,7 @@ chatAttachBtn.addEventListener("click", () => chatFileInput.click());
 chatFileInput.addEventListener("change", async () => {
   if(!chatFileInput.files.length) return;
   const file = chatFileInput.files[0];
+  if(ppWizard) cancelWizard();
 
   const thinking = document.createElement("div");
   thinking.className = "msg msg-bot msg-file";
@@ -232,6 +270,201 @@ chatFileRemoveBtn.addEventListener("click", async () => {
   chatFileChip.classList.add("hidden");
   chatAttachBtn.classList.remove("has-file");
   addMsg(saqrFormat("file_removed_msg", { filename: removedName }), "bot");
+  ppWizard = null; // attaching context is gone, so any in-progress wizard no longer makes sense
+});
+
+// ---------- AI presentation wizard ----------
+// A short guided Q&A (purpose, tone, slide count, visual style) collected
+// entirely client-side, then handed to the backend in one shot to design
+// a custom deck from the attached file. Can be started via the button on
+// the file chip, or by just typing something like "make a presentation
+// from this" while a file is attached.
+const createPptBtn = document.getElementById("createPptBtn");
+
+const WIZARD_STEPS = [
+  { key: "purpose", type: "text", promptKey: "wiz_q_purpose", placeholderKey: "wiz_q_purpose_placeholder" },
+  { key: "tone", type: "choice", promptKey: "wiz_q_tone", choices: [
+      { value: "formal", labelKey: "wiz_tone_formal" },
+      { value: "casual", labelKey: "wiz_tone_casual" },
+      { value: "academic", labelKey: "wiz_tone_academic" },
+      { value: "creative", labelKey: "wiz_tone_creative" },
+    ]},
+  { key: "slide_count", type: "choice", promptKey: "wiz_q_slides", choices: [
+      { value: "5", labelKey: "wiz_slides_5" },
+      { value: "8", labelKey: "wiz_slides_8" },
+      { value: "12", labelKey: "wiz_slides_12" },
+      { value: "auto", labelKey: "wiz_slides_auto" },
+    ]},
+  { key: "style", type: "choice", promptKey: "wiz_q_style", choices: [
+      { value: "minimal", labelKey: "wiz_style_minimal" },
+      { value: "bold", labelKey: "wiz_style_bold" },
+      { value: "classic", labelKey: "wiz_style_classic" },
+      { value: "surprise", labelKey: "wiz_style_surprise" },
+    ]},
+  { key: "extra", type: "text", promptKey: "wiz_q_extra", placeholderKey: "wiz_q_extra_placeholder", skippable: true },
+];
+
+const PRESENTATION_TRIGGER_RE = /\b(make|create|build|generate|design|turn this into)\b.{0,40}\b(presentation|slides?|slide ?deck|powerpoint|ppt)\b|\b(presentation|slides?|slide ?deck|powerpoint)\b.{0,40}\b(from|based on|using|out of|for|about)\b.{0,15}\b(this|it|file|attached|attachment)\b/i;
+
+let ppWizard = null; // { stepIndex, answers: {} }
+
+function addWizardStepMsg(step){
+  const div = document.createElement("div");
+  div.className = "msg msg-bot";
+  const tag = document.createElement("span");
+  tag.className = "msg-tag";
+  tag.textContent = "SAQR";
+  div.appendChild(tag);
+
+  const body = document.createElement("div");
+  body.className = "msg-body";
+  body.innerHTML = renderMarkdown(saqrT(step.promptKey));
+  div.appendChild(body);
+
+  if(step.type === "choice"){
+    const choicesWrap = document.createElement("div");
+    choicesWrap.className = "wizard-choices";
+    step.choices.forEach(choice => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "wizard-choice-btn";
+      btn.textContent = saqrT(choice.labelKey);
+      btn.addEventListener("click", () => {
+        Array.from(choicesWrap.children).forEach(c => c.disabled = true);
+        handleWizardAnswer(choice.value, saqrT(choice.labelKey));
+      });
+      choicesWrap.appendChild(btn);
+    });
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "wizard-choice-btn is-cancel";
+    cancelBtn.textContent = saqrT("wiz_cancel");
+    cancelBtn.addEventListener("click", () => {
+      Array.from(choicesWrap.children).forEach(c => c.disabled = true);
+      cancelWizard();
+    });
+    choicesWrap.appendChild(cancelBtn);
+    body.appendChild(choicesWrap);
+  } else if(step.skippable){
+    const choicesWrap = document.createElement("div");
+    choicesWrap.className = "wizard-choices";
+    const skipBtn = document.createElement("button");
+    skipBtn.type = "button";
+    skipBtn.className = "wizard-choice-btn is-skip";
+    skipBtn.textContent = saqrT("wiz_skip");
+    skipBtn.addEventListener("click", () => {
+      Array.from(choicesWrap.children).forEach(c => c.disabled = true);
+      handleWizardAnswer("", saqrT("wiz_skip"));
+    });
+    choicesWrap.appendChild(skipBtn);
+    body.appendChild(choicesWrap);
+    chatInput.placeholder = saqrT(step.placeholderKey);
+  } else if(step.placeholderKey){
+    chatInput.placeholder = saqrT(step.placeholderKey);
+  }
+
+  chatWindow.appendChild(div);
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+}
+
+function startWizard(){
+  if(!attachedChatFile){
+    addMsg(saqrT("wiz_need_file"), "bot");
+    return;
+  }
+  ppWizard = { stepIndex: 0, answers: {} };
+  addWizardStepMsg(WIZARD_STEPS[0]);
+}
+
+function cancelWizard(){
+  ppWizard = null;
+  chatInput.placeholder = saqrT("chat_placeholder");
+  addMsg(saqrT("wiz_cancelled_msg"), "bot");
+}
+
+function handleWizardAnswer(value, displayLabel){
+  if(!ppWizard) return;
+  addMsg(displayLabel, "user");
+
+  const step = WIZARD_STEPS[ppWizard.stepIndex];
+  ppWizard.answers[step.key] = value;
+  ppWizard.stepIndex++;
+  chatInput.placeholder = saqrT("chat_placeholder");
+
+  const nextStep = WIZARD_STEPS[ppWizard.stepIndex];
+  if(nextStep){
+    addWizardStepMsg(nextStep);
+  } else {
+    runPresentationGeneration();
+  }
+}
+
+async function runPresentationGeneration(){
+  const answers = ppWizard.answers;
+  ppWizard = null;
+
+  const thinking = document.createElement("div");
+  thinking.className = "msg msg-bot";
+  thinking.innerHTML = '<span class="msg-tag">SAQR</span><div class="msg-body">'
+    + saqrT("wiz_generating")
+    + ' <span class="typing-dots"><span></span><span></span><span></span></span></div>';
+  chatWindow.appendChild(thinking);
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+
+  try{
+    const res = await fetch("/api/chat_generate_presentation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers })
+    });
+    const data = await res.json();
+    thinking.remove();
+
+    if(!data.ok){
+      addMsg(saqrFormat("wiz_error", { error: data.error }), "bot");
+      return;
+    }
+
+    addMsg(data.rationale || saqrT("wiz_download_ready"), "bot");
+
+    const div = document.createElement("div");
+    div.className = "msg msg-bot";
+    const tag = document.createElement("span");
+    tag.className = "msg-tag";
+    tag.textContent = "SAQR";
+    div.appendChild(tag);
+
+    const body = document.createElement("div");
+    body.className = "msg-body";
+    const card = document.createElement("div");
+    card.className = "ppt-result-card";
+    card.innerHTML = `
+      <div class="ppt-meta" dir="ltr">
+        <span>${saqrT("wiz_theme_label")}: <b></b></span>
+        <span>${saqrT("wiz_slides_label")}: <b></b></span>
+      </div>
+    `;
+    card.querySelectorAll("b")[0].textContent = data.theme_label || "";
+    card.querySelectorAll("b")[1].textContent = data.slide_count || "";
+    const link = document.createElement("a");
+    link.className = "ppt-download-btn";
+    link.href = data.download_url;
+    link.setAttribute("download", "");
+    link.textContent = "⬇ " + saqrT("wiz_download_btn");
+    card.appendChild(link);
+    body.appendChild(card);
+    div.appendChild(body);
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }catch(err){
+    thinking.remove();
+    addMsg(saqrFormat("wiz_error", { error: String(err) }), "bot");
+  }
+}
+
+createPptBtn.addEventListener("click", () => {
+  if(ppWizard) return;
+  startWizard();
 });
 
 // ---------- analyze / upload ----------
