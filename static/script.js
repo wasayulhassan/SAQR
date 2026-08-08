@@ -35,6 +35,28 @@ const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
 let chatHistory = [];
 
+// ---------- web search toggle ----------
+// Either the user turns this on for the next message (🌐 button), or the
+// message itself implies it needs current information — either way the
+// client calls /api/web_search before /api/chat and feeds the results in.
+const webSearchBtn = document.getElementById("webSearchBtn");
+let webSearchActive = false;
+const WEB_SEARCH_TRIGGER_RE = /\b(search( the web| online)?|look ?up|google|find (out|info|information) about|what'?s the (latest|current|newest)|current (price|status|news|weather|version)|latest news|who is the (current )?(ceo|president|prime minister)|as of (today|now|202\d)|right now|these days|nowadays|today'?s)\b/i;
+
+webSearchBtn.addEventListener("click", () => {
+  webSearchActive = !webSearchActive;
+  webSearchBtn.classList.toggle("is-active", webSearchActive);
+});
+
+// ---------- voice: shared helpers ----------
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function speechLangCode(){
+  const lang = (typeof SAQR_CURRENT_LANG !== "undefined" && SAQR_CURRENT_LANG) || "en";
+  const map = { en: "en-US", ar: "ar-SA", ur: "ur-PK", hi: "hi-IN" };
+  return map[lang] || "en-US";
+}
+
 // ---------- lightweight markdown rendering for bot replies ----------
 // Model replies come back as markdown-ish text (bold, lists, paragraphs).
 // This turns that into clean, evenly-spaced HTML instead of showing the
@@ -113,7 +135,7 @@ function renderMarkdown(raw){
   return htmlBlocks.join("") || `<p>${renderInline(raw)}</p>`;
 }
 
-function addMsg(text, who){
+function addMsg(text, who, sources){
   const div = document.createElement("div");
   div.className = "msg " + (who === "user" ? "msg-user" : "msg-bot");
   const tag = document.createElement("span");
@@ -128,32 +150,49 @@ function addMsg(text, who){
   } else {
     body.innerHTML = renderMarkdown(text);
   }
-  div.appendChild(body);
 
+  if(sources && sources.length){
+    const srcWrap = document.createElement("div");
+    srcWrap.className = "msg-sources";
+    sources.slice(0, 5).forEach((s, i) => {
+      const a = document.createElement("a");
+      a.href = s.url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      let host = s.url;
+      try{ host = new URL(s.url).hostname.replace(/^www\./, ""); }catch(e){}
+      a.textContent = `[${i + 1}] ${host}`;
+      srcWrap.appendChild(a);
+    });
+    body.appendChild(srcWrap);
+  }
+
+  div.appendChild(body);
   chatWindow.appendChild(div);
   chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
-chatForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const message = chatInput.value.trim();
+// ---------- unified message submission ----------
+// Used by the normal Send button, by voice mode's auto-submit after
+// transcription, and by the presentation trigger phrase — one path so
+// wizard interception / web search / history stay consistent everywhere.
+async function submitChatMessage(message){
+  message = (message || "").trim();
   if(!message) return;
 
   // ---- presentation wizard interception ----
   if(ppWizard){
     if(/^(cancel|stop|nevermind|never mind)$/i.test(message)){
-      chatInput.value = "";
       addMsg(message, "user");
       cancelWizard();
       return;
     }
-    const step = WIZARD_STEPS[ppWizard.stepIndex];
+    const step = ppWizard.steps[ppWizard.stepIndex];
     if(step.type === "choice"){
       const matched = step.choices.find(c =>
         c.value.toLowerCase() === message.toLowerCase() ||
         saqrT(c.labelKey).toLowerCase() === message.toLowerCase()
       );
-      chatInput.value = "";
       if(matched){
         handleWizardAnswer(matched.value, saqrT(matched.labelKey));
       } else {
@@ -163,21 +202,18 @@ chatForm.addEventListener("submit", async (e) => {
       return;
     }
     // free-text step
-    chatInput.value = "";
     handleWizardAnswer(message, message);
     return;
   }
 
-  if(!ppWizard && attachedChatFile && PRESENTATION_TRIGGER_RE.test(message)){
+  if(!ppWizard && PRESENTATION_TRIGGER_RE.test(message)){
     addMsg(message, "user");
-    chatInput.value = "";
-    startWizard();
+    startWizard(message);
     return;
   }
 
   addMsg(message, "user");
   chatHistory.push({role:"user", content:message});
-  chatInput.value = "";
 
   const thinking = document.createElement("div");
   thinking.className = "msg msg-bot";
@@ -185,20 +221,45 @@ chatForm.addEventListener("submit", async (e) => {
   chatWindow.appendChild(thinking);
   chatWindow.scrollTop = chatWindow.scrollHeight;
 
+  // ---- web search for this turn, if toggled on or implied by the message ----
+  let webResults = null;
+  const shouldSearch = webSearchActive || WEB_SEARCH_TRIGGER_RE.test(message);
+  if(shouldSearch){
+    if(webSearchActive){ webSearchActive = false; webSearchBtn.classList.remove("is-active"); }
+    thinking.querySelector(".msg-body").innerHTML =
+      saqrT("thinking_searching") + ' <span class="typing-dots"><span></span><span></span><span></span></span>';
+    try{
+      const sres = await fetch("/api/web_search", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ query: message })
+      });
+      const sdata = await sres.json();
+      if(sdata.ok && sdata.results && sdata.results.length) webResults = sdata.results;
+    }catch(e){ /* best effort — proceed without web results */ }
+  }
+
   try{
     const res = await fetch("/api/chat", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({message, history: chatHistory.slice(-10)})
+      body: JSON.stringify({message, history: chatHistory.slice(-10), web_results: webResults})
     });
     const data = await res.json();
     thinking.remove();
-    addMsg(data.reply, "bot");
+    addMsg(data.reply, "bot", webResults);
     chatHistory.push({role:"assistant", content:data.reply});
+    if(voiceModeActive) speakText(data.reply);
   }catch(err){
     thinking.remove();
     addMsg("⚠️ Couldn't reach the server.", "bot");
   }
+}
+
+chatForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const message = chatInput.value.trim();
+  chatInput.value = "";
+  submitChatMessage(message);
 });
 
 // ---------- chat file attachment ----------
@@ -304,9 +365,23 @@ const WIZARD_STEPS = [
   { key: "extra", type: "text", promptKey: "wiz_q_extra", placeholderKey: "wiz_q_extra_placeholder", skippable: true },
 ];
 
-const PRESENTATION_TRIGGER_RE = /\b(make|create|build|generate|design|turn this into)\b.{0,40}\b(presentation|slides?|slide ?deck|powerpoint|ppt)\b|\b(presentation|slides?|slide ?deck|powerpoint)\b.{0,40}\b(from|based on|using|out of|for|about)\b.{0,15}\b(this|it|file|attached|attachment)\b/i;
+const PRESENTATION_TRIGGER_RE = /\b(make|create|build|generate|design|turn this into)\b.{0,60}\b(presentation|slides?|slide ?deck|powerpoint|ppt)\b|\b(presentation|slides?|slide ?deck|powerpoint)\b.{0,40}\b(from|based on|using|out of|for|about)\b.{0,15}\b(this|it|file|attached|attachment)\b/i;
 
-let ppWizard = null; // { stepIndex, answers: {} }
+// When no file is attached, a trigger phrase like "make a presentation about
+// the 2007 Honda Civic, why it's a good car" should skip straight to web
+// research instead of asking a redundant "what's the topic?" question.
+const TOPIC_STEP = { key: "topic", type: "text", promptKey: "wiz_q_topic", placeholderKey: "wiz_q_topic_placeholder" };
+
+function extractTopicFromMessage(message){
+  const m = (message || "").match(/\b(?:presentation|slides?|slide ?deck|powerpoint|ppt)\b\s*(?:on|about|regarding|covering)\s+(.+?)[\s.!?]*$/i);
+  if(!m) return null;
+  const candidate = m[1].trim();
+  if(!candidate) return null;
+  if(/^(this|it|that|the file|my file|the attached( file)?|attached|the attachment|this file|this data|that file)$/i.test(candidate)) return null;
+  return candidate;
+}
+
+let ppWizard = null; // { stepIndex, answers: {}, steps: [] }
 
 function addWizardStepMsg(step){
   const div = document.createElement("div");
@@ -367,13 +442,29 @@ function addWizardStepMsg(step){
   chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
-function startWizard(){
-  if(!attachedChatFile){
-    addMsg(saqrT("wiz_need_file"), "bot");
+function startWizard(triggerMessage){
+  // File attached → same guided flow as before, straight into WIZARD_STEPS.
+  // No file → this is a topic-based (web-research) deck. If the trigger
+  // phrase already named a topic ("...presentation about the 2007 Honda
+  // Civic"), skip asking for it again; otherwise insert a topic question
+  // as the first step.
+  if(attachedChatFile){
+    ppWizard = { stepIndex: 0, answers: {}, steps: WIZARD_STEPS };
+    addWizardStepMsg(WIZARD_STEPS[0]);
     return;
   }
-  ppWizard = { stepIndex: 0, answers: {} };
-  addWizardStepMsg(WIZARD_STEPS[0]);
+
+  const extractedTopic = extractTopicFromMessage(triggerMessage);
+  if(extractedTopic){
+    ppWizard = { stepIndex: 0, answers: { topic: extractedTopic }, steps: WIZARD_STEPS };
+    addMsg(saqrFormat("wiz_topic_confirmed", { topic: extractedTopic }), "bot");
+    addWizardStepMsg(WIZARD_STEPS[0]);
+    return;
+  }
+
+  const steps = [TOPIC_STEP, ...WIZARD_STEPS];
+  ppWizard = { stepIndex: 0, answers: {}, steps };
+  addWizardStepMsg(steps[0]);
 }
 
 function cancelWizard(){
@@ -386,12 +477,12 @@ function handleWizardAnswer(value, displayLabel){
   if(!ppWizard) return;
   addMsg(displayLabel, "user");
 
-  const step = WIZARD_STEPS[ppWizard.stepIndex];
+  const step = ppWizard.steps[ppWizard.stepIndex];
   ppWizard.answers[step.key] = value;
   ppWizard.stepIndex++;
   chatInput.placeholder = saqrT("chat_placeholder");
 
-  const nextStep = WIZARD_STEPS[ppWizard.stepIndex];
+  const nextStep = ppWizard.steps[ppWizard.stepIndex];
   if(nextStep){
     addWizardStepMsg(nextStep);
   } else {
@@ -452,6 +543,23 @@ async function runPresentationGeneration(){
     link.setAttribute("download", "");
     link.textContent = "⬇ " + saqrT("wiz_download_btn");
     card.appendChild(link);
+
+    if(data.sources && data.sources.length){
+      const srcWrap = document.createElement("div");
+      srcWrap.className = "msg-sources";
+      data.sources.slice(0, 5).forEach((url, i) => {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        let host = url;
+        try{ host = new URL(url).hostname.replace(/^www\./, ""); }catch(e){}
+        a.textContent = `[${i + 1}] ${host}`;
+        srcWrap.appendChild(a);
+      });
+      card.appendChild(srcWrap);
+    }
+
     body.appendChild(card);
     div.appendChild(body);
     chatWindow.appendChild(div);
@@ -466,6 +574,145 @@ createPptBtn.addEventListener("click", () => {
   if(ppWizard) return;
   startWizard();
 });
+
+// ---------- voice: mic button (speech-to-text into the input) ----------
+const micBtn = document.getElementById("micBtn");
+let micRecognition = null;
+let micListening = false;
+
+if(SpeechRecognitionCtor){
+  micBtn.addEventListener("click", () => {
+    if(micListening){ micRecognition && micRecognition.stop(); return; }
+    micRecognition = new SpeechRecognitionCtor();
+    micRecognition.lang = speechLangCode();
+    micRecognition.interimResults = false;
+    micRecognition.maxAlternatives = 1;
+
+    micRecognition.addEventListener("result", (e) => {
+      const transcript = e.results[0][0].transcript;
+      chatInput.value = chatInput.value ? chatInput.value + " " + transcript : transcript;
+      chatInput.focus();
+    });
+    micRecognition.addEventListener("end", () => {
+      micListening = false;
+      micBtn.classList.remove("is-recording");
+    });
+    micRecognition.addEventListener("error", () => {
+      micListening = false;
+      micBtn.classList.remove("is-recording");
+    });
+
+    try{
+      micRecognition.start();
+      micListening = true;
+      micBtn.classList.add("is-recording");
+    }catch(e){ /* already running */ }
+  });
+} else {
+  micBtn.addEventListener("click", () => addMsg(saqrT("voice_unsupported"), "bot"));
+}
+
+// ---------- voice mode: live back-and-forth conversation ----------
+// Listens → auto-submits what it hears through the same submitChatMessage
+// path as typing → speaks the reply aloud → listens again. Runs until the
+// user hits Stop (or the banner's stop button).
+const voiceModeBtn = document.getElementById("voiceModeBtn");
+const voiceModeBanner = document.getElementById("voiceModeBanner");
+const voiceModeStatus = document.getElementById("voiceModeStatus");
+const voiceModeStopBtn = document.getElementById("voiceModeStopBtn");
+
+let voiceModeActive = false;
+let voiceModeRecognition = null;
+
+function stripMarkdownForSpeech(text){
+  return String(text || "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\[(\d+)\]/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function speakText(text){
+  if(!("speechSynthesis" in window)) return;
+  const clean = stripMarkdownForSpeech(text);
+  if(!clean){
+    if(voiceModeActive) startVoiceModeListening();
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(clean);
+  utter.lang = speechLangCode();
+  utter.onend = () => { if(voiceModeActive) startVoiceModeListening(); };
+  utter.onerror = () => { if(voiceModeActive) startVoiceModeListening(); };
+  window.speechSynthesis.speak(utter);
+}
+
+function startVoiceModeListening(){
+  if(!voiceModeActive || !SpeechRecognitionCtor) return;
+  voiceModeStatus.textContent = saqrT("voice_mode_listening");
+  let gotResult = false;
+
+  voiceModeRecognition = new SpeechRecognitionCtor();
+  voiceModeRecognition.lang = speechLangCode();
+  voiceModeRecognition.interimResults = false;
+  voiceModeRecognition.maxAlternatives = 1;
+
+  voiceModeRecognition.addEventListener("result", (e) => {
+    const transcript = e.results[0][0].transcript;
+    if(transcript && transcript.trim()){
+      gotResult = true;
+      voiceModeStatus.textContent = saqrT("voice_mode_thinking");
+      submitChatMessage(transcript);
+    }
+  });
+  voiceModeRecognition.addEventListener("end", () => {
+    if(voiceModeActive && !gotResult){
+      setTimeout(() => { if(voiceModeActive) startVoiceModeListening(); }, 400);
+    }
+  });
+  voiceModeRecognition.addEventListener("error", (e) => {
+    if(!voiceModeActive) return;
+    if(e.error === "not-allowed" || e.error === "service-not-allowed"){
+      addMsg(saqrT("voice_mic_denied"), "bot");
+      stopVoiceMode();
+    }
+    // other errors (no-speech, aborted, network hiccups) retry via the 'end' handler above
+  });
+
+  try{ voiceModeRecognition.start(); }catch(e){ /* already running */ }
+}
+
+function stopVoiceMode(){
+  voiceModeActive = false;
+  voiceModeBanner.classList.add("hidden");
+  voiceModeBtn.classList.remove("is-active");
+  if(voiceModeRecognition){ try{ voiceModeRecognition.stop(); }catch(e){} }
+  if("speechSynthesis" in window) window.speechSynthesis.cancel();
+}
+
+function startVoiceMode(){
+  if(!SpeechRecognitionCtor || !("speechSynthesis" in window)){
+    addMsg(saqrT("voice_unsupported"), "bot");
+    return;
+  }
+  if(micListening){ micRecognition && micRecognition.stop(); }
+  voiceModeActive = true;
+  voiceModeBanner.classList.remove("hidden");
+  voiceModeBtn.classList.add("is-active");
+  startVoiceModeListening();
+}
+
+voiceModeBtn.addEventListener("click", () => {
+  if(voiceModeActive){ stopVoiceMode(); } else { startVoiceMode(); }
+});
+voiceModeStopBtn.addEventListener("click", stopVoiceMode);
 
 // ---------- analyze / upload ----------
 const dropzone = document.getElementById("dropzone");

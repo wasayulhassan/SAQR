@@ -71,7 +71,20 @@ const SAQR_TRANSLATIONS = {
     wiz_generating: "Designing your presentation — this can take a minute or two…",
     wiz_error: "Couldn't generate the presentation: {error}",
     wiz_download_ready: "Your presentation is ready.",
-    wiz_theme_label: "Theme", wiz_slides_label: "Slides", wiz_download_btn: "Download .pptx"
+    wiz_theme_label: "Theme", wiz_slides_label: "Slides", wiz_download_btn: "Download .pptx",
+    web_search_btn_title: "Search the web for this message",
+    mic_btn_title: "Voice to text",
+    voice_mode_btn_title: "Talk to SAQR (voice mode)",
+    voice_mode_listening: "Voice mode active — listening…",
+    voice_mode_thinking: "Voice mode — thinking…",
+    voice_mode_stop: "Stop",
+    voice_unsupported: "Voice isn't supported in this browser — try Chrome on desktop or Android.",
+    voice_mic_denied: "Microphone access was blocked — allow it in your browser settings to use voice.",
+    chat_file_hint_full: "Attach a CSV, Excel, PDF, Word, or text file to ask SAQR anything about it — or use 🌐 to search the web, 🎤 to talk, or 🎧 for a full voice conversation.",
+    wiz_q_topic: "What topic should I research and build the presentation about?",
+    wiz_q_topic_placeholder: "e.g. Why the 2007 Honda Civic is a great car",
+    wiz_topic_confirmed: "Got it — researching \"{topic}\" on the web…",
+    thinking_searching: "Searching the web…"
   },
   ar: {
     engine_free: "المحرك: مستضاف (مجاني)",
@@ -139,7 +152,20 @@ const SAQR_TRANSLATIONS = {
     wiz_generating: "جارٍ تصميم عرضك التقديمي — قد يستغرق ذلك دقيقة أو دقيقتين…",
     wiz_error: "تعذّر إنشاء العرض التقديمي: {error}",
     wiz_download_ready: "عرضك التقديمي جاهز.",
-    wiz_theme_label: "النمط", wiz_slides_label: "الشرائح", wiz_download_btn: "تنزيل .pptx"
+    wiz_theme_label: "النمط", wiz_slides_label: "الشرائح", wiz_download_btn: "تنزيل .pptx",
+    web_search_btn_title: "البحث في الويب عن هذه الرسالة",
+    mic_btn_title: "تحويل الصوت إلى نص",
+    voice_mode_btn_title: "تحدث مع صقر (وضع صوتي)",
+    voice_mode_listening: "الوضع الصوتي نشط — جارٍ الاستماع…",
+    voice_mode_thinking: "الوضع الصوتي — جارٍ التفكير…",
+    voice_mode_stop: "إيقاف",
+    voice_unsupported: "الصوت غير مدعوم في هذا المتصفح — جرّب Chrome على الحاسوب أو أندرويد.",
+    voice_mic_denied: "تم حظر الوصول إلى الميكروفون — فعّله من إعدادات المتصفح لاستخدام الصوت.",
+    chat_file_hint_full: "أرفق ملف CSV أو Excel أو PDF أو Word أو نصي لتسأل صقر عنه أي شيء — أو استخدم 🌐 للبحث في الويب، 🎤 للتحدث، أو 🎧 لمحادثة صوتية كاملة.",
+    wiz_q_topic: "ما الموضوع الذي تريدني أن أبحث عنه وأبني العرض التقديمي حوله؟",
+    wiz_q_topic_placeholder: "مثال: لماذا تُعد هوندا سيفيك 2007 سيارة رائعة",
+    wiz_topic_confirmed: "تمام — جارٍ البحث عن \"{topic}\" على الويب…",
+    thinking_searching: "جارٍ البحث في الويب…"
   },
   ur: {
     engine_free: "انجن: میزبان (مفت)",
@@ -207,7 +233,20 @@ const SAQR_TRANSLATIONS = {
     wiz_generating: "آپ کی پریزنٹیشن ڈیزائن کی جا رہی ہے — اس میں ایک سے دو منٹ لگ سکتے ہیں…",
     wiz_error: "پریزنٹیشن نہیں بن سکی: {error}",
     wiz_download_ready: "آپ کی پریزنٹیشن تیار ہے۔",
-    wiz_theme_label: "تھیم", wiz_slides_label: "سلائیڈز", wiz_download_btn: ".pptx ڈاؤن لوڈ کریں"
+    wiz_theme_label: "تھیم", wiz_slides_label: "سلائیڈز", wiz_download_btn: ".pptx ڈاؤن لوڈ کریں",
+    web_search_btn_title: "اس پیغام کے لیے ویب پر تلاش کریں",
+    mic_btn_title: "آواز کو متن میں تبدیل کریں",
+    voice_mode_btn_title: "صقر سے بات کریں (وائس موڈ)",
+    voice_mode_listening: "وائس موڈ فعال — سن رہا ہوں…",
+    voice_mode_thinking: "وائس موڈ — سوچ رہا ہوں…",
+    voice_mode_stop: "روکیں",
+    voice_unsupported: "اس براؤزر میں آواز کی سہولت دستیاب نہیں — ڈیسک ٹاپ یا اینڈرائیڈ پر Chrome آزمائیں۔",
+    voice_mic_denied: "مائیکروفون تک رسائی مسدود کر دی گئی — آواز استعمال کرنے کے لیے براؤزر کی سیٹنگز میں اسے فعال کریں۔",
+    chat_file_hint_full: "صقر سے کچھ بھی پوچھنے کے لیے CSV، Excel، PDF، Word، یا ٹیکسٹ فائل منسلک کریں — یا 🌐 سے ویب پر تلاش کریں، 🎤 سے بولیں، یا 🎧 سے مکمل وائس گفتگو کریں۔",
+    wiz_q_topic: "میں کس موضوع پر تحقیق کر کے پریزنٹیشن بناؤں؟",
+    wiz_q_topic_placeholder: "مثلاً: 2007 ہونڈا سیوک ایک بہترین گاڑی کیوں ہے",
+    wiz_topic_confirmed: "ٹھیک ہے — ویب پر \"{topic}\" کے بارے میں تحقیق کر رہا ہوں…",
+    thinking_searching: "ویب پر تلاش ہو رہی ہے…"
   },
   hi: {
     engine_free: "इंजन: होस्टेड (मुफ़्त)",
@@ -275,7 +314,20 @@ const SAQR_TRANSLATIONS = {
     wiz_generating: "आपकी प्रस्तुति डिज़ाइन की जा रही है — इसमें एक से दो मिनट लग सकते हैं…",
     wiz_error: "प्रस्तुति नहीं बन सकी: {error}",
     wiz_download_ready: "आपकी प्रस्तुति तैयार है।",
-    wiz_theme_label: "थीम", wiz_slides_label: "स्लाइड्स", wiz_download_btn: ".pptx डाउनलोड करें"
+    wiz_theme_label: "थीम", wiz_slides_label: "स्लाइड्स", wiz_download_btn: ".pptx डाउनलोड करें",
+    web_search_btn_title: "इस संदेश के लिए वेब पर खोजें",
+    mic_btn_title: "आवाज़ को टेक्स्ट में बदलें",
+    voice_mode_btn_title: "SAQR से बात करें (वॉइस मोड)",
+    voice_mode_listening: "वॉइस मोड सक्रिय — सुन रहा हूँ…",
+    voice_mode_thinking: "वॉइस मोड — सोच रहा हूँ…",
+    voice_mode_stop: "रोकें",
+    voice_unsupported: "इस ब्राउज़र में वॉइस सपोर्ट नहीं है — डेस्कटॉप या Android पर Chrome आज़माएं।",
+    voice_mic_denied: "माइक्रोफ़ोन एक्सेस ब्लॉक कर दिया गया — वॉइस इस्तेमाल करने के लिए ब्राउज़र सेटिंग्स में इसे अनुमति दें।",
+    chat_file_hint_full: "SAQR से कुछ भी पूछने के लिए CSV, Excel, PDF, Word, या टेक्स्ट फ़ाइल अटैच करें — या 🌐 से वेब पर खोजें, 🎤 से बोलें, या 🎧 से पूरी वॉइस बातचीत करें।",
+    wiz_q_topic: "मुझे किस विषय पर शोध करके प्रस्तुति बनानी चाहिए?",
+    wiz_q_topic_placeholder: "जैसे: 2007 होंडा सिविक एक शानदार कार क्यों है",
+    wiz_topic_confirmed: "ठीक है — वेब पर \"{topic}\" के बारे में शोध कर रहा हूँ…",
+    thinking_searching: "वेब पर खोजा जा रहा है…"
   }
 };
 

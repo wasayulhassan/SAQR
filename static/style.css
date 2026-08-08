@@ -223,8 +223,39 @@ body.rtl .msg-body ul, body.rtl .msg-body ol{ padding-left:0; padding-right:20px
 .chat-attach-btn svg{ width:19px; height:19px; }
 .chat-attach-btn:hover{ color:var(--white); border-color:var(--red); }
 .chat-attach-btn.has-file{ color:var(--red); border-color:var(--red); }
+.chat-attach-btn.is-active{ background:var(--red); color:var(--white); border-color:var(--red); }
+.chat-attach-btn.is-recording{ background:var(--red); color:var(--white); border-color:var(--red); animation:recPulse 1.3s infinite; }
+@keyframes recPulse{
+  0%,100%{ box-shadow:0 0 0 0 var(--red-glow); }
+  50%{ box-shadow:0 0 0 6px transparent; }
+}
 
 .chat-file-hint{ color:var(--muted); font-size:11.5px; margin:8px 2px 0; }
+
+.voice-mode-banner{
+  display:flex; align-items:center; gap:10px;
+  background:var(--panel); border:1px solid var(--red); border-radius:10px;
+  padding:10px 14px; margin-bottom:10px; font-size:12.5px; color:var(--off-white);
+}
+.voice-mode-banner .voice-mode-dot{
+  width:8px; height:8px; border-radius:50%; background:var(--red); flex-shrink:0;
+  animation:pulse 1.3s infinite ease-in-out;
+}
+.voice-mode-banner span:nth-child(2){ flex:1; }
+.voice-mode-banner button{
+  background:transparent; border:1px solid var(--line); color:var(--muted);
+  padding:5px 12px; border-radius:8px; font-size:11.5px; font-weight:700; cursor:pointer;
+}
+.voice-mode-banner button:hover{ color:var(--white); border-color:var(--red); }
+
+.msg-sources{ margin-top:10px; display:flex; flex-wrap:wrap; gap:6px; }
+.msg-sources a{
+  display:inline-block; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  background:rgba(255,255,255,0.06); border:1px solid var(--line); color:var(--muted);
+  font-size:11px; padding:4px 10px; border-radius:999px; text-decoration:none;
+  direction:ltr; unicode-bidi:isolate;
+}
+.msg-sources a:hover{ color:var(--white); border-color:var(--red); }
 
 .chat-file-chip{
   display:flex; align-items:center; gap:10px;
