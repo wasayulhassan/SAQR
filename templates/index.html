@@ -116,6 +116,11 @@
           <p data-i18n="chat_p">Ask anything. Backed by a local model — no data leaves this machine.</p>
         </div>
       </div>
+      <div class="voice-mode-banner hidden" id="voiceModeBanner">
+        <span class="voice-mode-dot"></span>
+        <span id="voiceModeStatus" data-i18n="voice_mode_listening">Voice mode active — listening…</span>
+        <button type="button" id="voiceModeStopBtn" data-i18n="voice_mode_stop">Stop</button>
+      </div>
       <div class="chat-window" id="chatWindow">
         <div class="msg msg-bot">
           <span class="msg-tag">SAQR</span>
@@ -140,10 +145,19 @@
         <button type="button" class="chat-attach-btn" id="chatAttachBtn" data-i18n-title="attach_file_title" title="Attach a file">
           <svg viewBox="0 0 24 24" fill="none"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.07-7.07l8.59-8.6a3.5 3.5 0 0 1 4.95 4.95l-8.6 8.6a2 2 0 0 1-2.83-2.83l7.78-7.78" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
+        <button type="button" class="chat-attach-btn" id="webSearchBtn" data-i18n-title="web_search_btn_title" title="Search the web for this message">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.8 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.8-3.8-9s1.3-6.4 3.8-9Z" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <button type="button" class="chat-attach-btn" id="micBtn" data-i18n-title="mic_btn_title" title="Voice to text">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" class="chat-attach-btn" id="voiceModeBtn" data-i18n-title="voice_mode_btn_title" title="Talk to SAQR (voice mode)">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16v10H8l-4 4V5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        </button>
         <input type="text" id="chatInput" data-i18n-placeholder="chat_placeholder" placeholder="Ask SAQR…" autocomplete="off">
         <button type="submit" data-i18n="send_btn">Send</button>
       </form>
-      <p class="chat-file-hint" data-i18n="chat_file_hint">Attach a CSV, Excel, PDF, Word, or text file to ask SAQR anything about it.</p>
+      <p class="chat-file-hint" data-i18n="chat_file_hint_full">Attach a CSV, Excel, PDF, Word, or text file to ask SAQR anything about it — or use 🌐 to search the web, 🎤 to talk, or 🎧 for a full voice conversation.</p>
     </section>
 
     <!-- PANEL: Analyze -->
