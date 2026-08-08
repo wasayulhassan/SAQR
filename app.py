@@ -5,14 +5,15 @@ import traceback
 from flask import Flask, request, jsonify, render_template, send_file
 
 sys.path.insert(0, os.path.dirname(__file__))
-from modules import chatbot, analyzer, solver, report_gen, ppt_gen, chart_builder
+from modules import chatbot, analyzer, solver, report_gen, ppt_gen, chart_builder, file_context, ai_ppt, ppt_themes, web_search
 
 app = Flask(__name__)
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Keep last analysis in memory per simple session (single-user local app)
+# Keep last analysis / attached chat file in memory (single-user local app)
 LAST_ANALYSIS = {}
+CHAT_FILE = {}
 
 
 @app.route("/")
@@ -42,8 +43,111 @@ def api_chat():
     data = request.get_json(force=True)
     message = data.get("message", "")
     history = data.get("history", [])
-    reply = chatbot.chat(message, history=history, data_context=_build_data_context())
+    web_results = data.get("web_results")  # client already ran /api/web_search for this turn, if triggered
+    reply = chatbot.chat(
+        message,
+        history=history,
+        data_context=_build_data_context(),
+        file_context=CHAT_FILE.get("data"),
+        web_context=web_results,
+    )
     return jsonify({"reply": reply})
+
+
+@app.route("/api/web_search", methods=["POST"])
+def api_web_search():
+    """Free, no-key web search (DuckDuckGo) — used both to ground a single
+    chat reply in current information, and to research a topic from
+    scratch for the presentation wizard when no file is attached."""
+    data = request.get_json(force=True)
+    query = (data.get("query") or "").strip()
+    if not query:
+        return jsonify({"ok": False, "error": "No search query given"}), 400
+    results = web_search.search(query)
+    return jsonify({"ok": True, "results": results, "query": query})
+
+
+@app.route("/api/chat_upload", methods=["POST"])
+def api_chat_upload():
+    """Attach a file directly in the Chat panel — extracts a compact,
+    model-friendly summary so the chatbot can have a real conversation
+    about it (separate from the full stats pipeline in the Analyze tab)."""
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "No file uploaded"}), 400
+    f = request.files["file"]
+    if f.filename == "":
+        return jsonify({"ok": False, "error": "Empty filename"}), 400
+
+    save_path = os.path.join(UPLOAD_DIR, f.filename)
+    f.save(save_path)
+
+    try:
+        ctx = file_context.extract_context(save_path, f.filename)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+    ctx["save_path"] = save_path
+    CHAT_FILE["data"] = ctx
+    return jsonify({
+        "ok": True,
+        "filename": ctx["filename"],
+        "meta": ctx["meta"],
+        "type": ctx["type"],
+        "truncated": ctx["truncated"],
+    })
+
+
+@app.route("/api/chat_file_clear", methods=["POST"])
+def api_chat_file_clear():
+    CHAT_FILE.pop("data", None)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/chat_generate_presentation", methods=["POST"])
+def api_chat_generate_presentation():
+    """The chat-driven 'make me a presentation from this file' flow: takes
+    the guided-wizard answers collected client-side, asks the model for a
+    custom outline (with its own opinion/rationale), picks a visual theme,
+    builds real charts from the file's data where relevant, and generates
+    the .pptx."""
+    file_ctx = CHAT_FILE.get("data")
+    data = request.get_json(silent=True) or {}
+    answers = data.get("answers", {})
+
+    if not file_ctx:
+        # No file attached — build a deck straight from a topic via web research
+        topic = (answers.get("topic") or "").strip()
+        if not topic:
+            return jsonify({"ok": False, "error": "Attach a file, or tell me a topic to research"}), 400
+        try:
+            results = web_search.search(topic)
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"ok": False, "error": f"Web search failed: {e}"}), 500
+        if not results:
+            return jsonify({"ok": False, "error": "Couldn't find anything on the web for that topic right now — try again shortly, or attach a file instead"}), 502
+        file_ctx = web_search.build_web_file_context(topic, results)
+
+    try:
+        outline = ai_ppt.build_outline(file_ctx, answers)
+        theme = ppt_themes.pick_theme(answers.get("style"))
+        fpath = ai_ppt.generate_presentation(
+            outline, theme, file_ctx, saved_filepath=file_ctx.get("save_path")
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({
+        "ok": True,
+        "download_url": f"/api/download/{os.path.basename(fpath)}",
+        "title": outline.get("title", "Presentation"),
+        "rationale": outline.get("rationale", ""),
+        "theme_label": theme.get("label", ""),
+        "slide_count": len(outline.get("slides", [])) + 2,  # + title + closing
+        "sources": file_ctx.get("sources", []),
+    })
 
 
 @app.route("/api/upload", methods=["POST"])
