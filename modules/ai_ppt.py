@@ -52,6 +52,13 @@ def _outline_system_prompt(file_ctx: dict, answers: dict) -> str:
             "genuinely help — and only use column names that actually exist in the data "
             "(they're listed below in the file content)."
         )
+    elif file_ctx.get("type") == "web":
+        columns_note = (
+            "\nThis content comes from several numbered web search results, not a "
+            "single file — synthesize across them in your own words rather than "
+            "quoting any one source at length, and don't request chart slides "
+            "(there's no underlying dataset)."
+        )
 
     return f"""You are Saqr, an assistant that designs custom presentations from a
 student's or professional's uploaded file. Given the file's content and the

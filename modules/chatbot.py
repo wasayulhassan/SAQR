@@ -51,7 +51,7 @@ def is_ollama_running() -> bool:
     return bool(HF_TOKEN)
 
 
-def _build_system_prompt(data_context: dict = None, file_context: dict = None) -> str:
+def _build_system_prompt(data_context: dict = None, file_context: dict = None, web_context: list = None) -> str:
     prompt = SYSTEM_PROMPT
 
     if data_context:
@@ -77,6 +77,17 @@ def _build_system_prompt(data_context: dict = None, file_context: dict = None) -
             f"point out issues, summarize sections, whatever they need. "
             f"Here is its extracted content{truncated_note}:\n"
             + file_context.get("content_text", "")
+        )
+
+    if web_context:
+        from . import web_search
+        prompt += (
+            "\n\nYou just searched the web for current information relevant to "
+            "the user's question. Use it to ground your answer, and briefly "
+            "mention/cite sources by number like [1] where relevant. If the "
+            "results don't actually answer the question, say so honestly "
+            "rather than guessing:\n"
+            + web_search.format_for_prompt(web_context)
         )
 
     return prompt
@@ -129,7 +140,7 @@ def chat_raw(system_prompt: str, user_prompt: str, max_tokens: int = 1200, tempe
 
 
 def chat(message: str, model: str = None, history=None, data_context: dict = None,
-         file_context: dict = None) -> str:
+         file_context: dict = None, web_context: list = None) -> str:
     """
     Send a message to the free Hugging Face router API and return its reply.
     `history` is an optional list of {"role": "user"/"assistant", "content": str}
@@ -138,6 +149,9 @@ def chat(message: str, model: str = None, history=None, data_context: dict = Non
     `file_context` is an optional dict describing a file attached directly
     in the chat panel (see modules/file_context.py) — filename, meta, and
     extracted text — used to have a real conversation about that file.
+    `web_context` is an optional list of {title, snippet, url} search
+    results (see modules/web_search.py) for the current message, used to
+    ground answers that need up-to-date information.
     """
     if not HF_TOKEN:
         return (
@@ -147,7 +161,7 @@ def chat(message: str, model: str = None, history=None, data_context: dict = Non
             "Data analysis, report, PPT, and solver tools still work without it."
         )
 
-    messages = [{"role": "system", "content": _build_system_prompt(data_context, file_context)}]
+    messages = [{"role": "system", "content": _build_system_prompt(data_context, file_context, web_context)}]
     if history:
         for turn in history:
             role = "user" if turn["role"] == "user" else "assistant"
