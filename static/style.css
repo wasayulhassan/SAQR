@@ -206,13 +206,18 @@ body.rtl .msg-body ul, body.rtl .msg-body ol{ padding-left:0; padding-right:20px
 }
 .chat-input-row input:focus{ outline:none; border-color:var(--red); }
 .chat-input-row input::placeholder{ color:var(--muted); }
-.chat-input-row button, .run-btn{
+/* Scoped to button[type="submit"] (the Send button) only — a plain
+   ".chat-input-row button" selector here used to also match the icon
+   toggle buttons below (same specificity as .chat-attach-btn, so this
+   rule's large padding + box-sizing:border-box squashed their 44px box
+   down to zero content width, hiding the SVGs entirely). */
+.chat-input-row button[type="submit"], .run-btn{
   background:var(--red); color:var(--white); border:none; font-weight:700;
   padding:12px 22px; border-radius:10px; cursor:pointer; font-family:inherit;
   font-size:13px; letter-spacing:.3px; transition:filter .15s ease;
   box-shadow:0 6px 16px var(--red-glow);
 }
-.chat-input-row button:hover, .run-btn:hover{ filter:brightness(1.12); }
+.chat-input-row button[type="submit"]:hover, .run-btn:hover{ filter:brightness(1.12); }
 
 .chat-attach-btn{
   flex-shrink:0; width:44px; height:44px; border-radius:10px;
@@ -247,6 +252,12 @@ body.rtl .msg-body ul, body.rtl .msg-body ol{ padding-left:0; padding-right:20px
   padding:5px 12px; border-radius:8px; font-size:11.5px; font-weight:700; cursor:pointer;
 }
 .voice-mode-banner button:hover{ color:var(--white); border-color:var(--red); }
+.voice-select{
+  background:var(--black-soft); border:1px solid var(--line); color:var(--off-white);
+  padding:5px 8px; border-radius:8px; font-size:11.5px; font-family:inherit;
+  max-width:150px; cursor:pointer;
+}
+.voice-select:focus{ outline:none; border-color:var(--red); }
 
 .msg-sources{ margin-top:10px; display:flex; flex-wrap:wrap; gap:6px; }
 .msg-sources a{
@@ -425,4 +436,35 @@ body.rtl .msg-body ul, body.rtl .msg-body ol{ padding-left:0; padding-right:20px
   .rail-btn{ white-space:nowrap; }
   .export-grid{ grid-template-columns:1fr; }
   .content{ padding:20px 16px 50px; }
+}
+
+/* ---------- phone / narrow tablet ---------- */
+@media (max-width: 640px){
+  .topbar{ padding:12px 14px; gap:10px; }
+  .brand-sub{ display:none; }
+  .top-right{ width:100%; justify-content:space-between; }
+  .status-strip{ order:2; width:100%; }
+  .lang-switch{ order:1; }
+
+  .content{ padding:16px 12px 40px; }
+  .panel-head{ flex-direction:column; align-items:flex-start; }
+
+  .stats-row, .quick-actions{ grid-template-columns:1fr; }
+
+  .chat-window{ height:340px; padding:14px; }
+  .msg{ max-width:92%; font-size:13.5px; }
+
+  .chat-input-row{ flex-wrap:wrap; row-gap:8px; }
+  .chat-attach-btn{ width:38px; height:38px; }
+  .chat-attach-btn svg{ width:16px; height:16px; }
+  .chat-input-row #chatInput{ flex:1 1 100%; order:1; }
+  .chat-input-row button[type="submit"]{ flex:1 1 100%; order:2; }
+
+  .chat-file-chip{ flex-wrap:wrap; row-gap:8px; }
+
+  .voice-mode-banner{ flex-wrap:wrap; row-gap:8px; }
+  .voice-select{ max-width:none; flex:1 1 auto; }
+
+  .wizard-choices{ width:100%; }
+  .wizard-choice-btn{ flex:1 1 auto; }
 }

@@ -84,7 +84,9 @@ const SAQR_TRANSLATIONS = {
     wiz_q_topic: "What topic should I research and build the presentation about?",
     wiz_q_topic_placeholder: "e.g. Why the 2007 Honda Civic is a great car",
     wiz_topic_confirmed: "Got it — researching \"{topic}\" on the web…",
-    thinking_searching: "Searching the web…"
+    thinking_searching: "Searching the web…",
+    voice_select_title: "Choose a voice",
+    voice_auto_label: "Auto (best available)"
   },
   ar: {
     engine_free: "المحرك: مستضاف (مجاني)",
@@ -165,7 +167,9 @@ const SAQR_TRANSLATIONS = {
     wiz_q_topic: "ما الموضوع الذي تريدني أن أبحث عنه وأبني العرض التقديمي حوله؟",
     wiz_q_topic_placeholder: "مثال: لماذا تُعد هوندا سيفيك 2007 سيارة رائعة",
     wiz_topic_confirmed: "تمام — جارٍ البحث عن \"{topic}\" على الويب…",
-    thinking_searching: "جارٍ البحث في الويب…"
+    thinking_searching: "جارٍ البحث في الويب…",
+    voice_select_title: "اختر صوتًا",
+    voice_auto_label: "تلقائي (الأفضل المتاح)"
   },
   ur: {
     engine_free: "انجن: میزبان (مفت)",
@@ -246,7 +250,9 @@ const SAQR_TRANSLATIONS = {
     wiz_q_topic: "میں کس موضوع پر تحقیق کر کے پریزنٹیشن بناؤں؟",
     wiz_q_topic_placeholder: "مثلاً: 2007 ہونڈا سیوک ایک بہترین گاڑی کیوں ہے",
     wiz_topic_confirmed: "ٹھیک ہے — ویب پر \"{topic}\" کے بارے میں تحقیق کر رہا ہوں…",
-    thinking_searching: "ویب پر تلاش ہو رہی ہے…"
+    thinking_searching: "ویب پر تلاش ہو رہی ہے…",
+    voice_select_title: "ایک آواز منتخب کریں",
+    voice_auto_label: "خودکار (بہترین دستیاب)"
   },
   hi: {
     engine_free: "इंजन: होस्टेड (मुफ़्त)",
@@ -327,7 +333,9 @@ const SAQR_TRANSLATIONS = {
     wiz_q_topic: "मुझे किस विषय पर शोध करके प्रस्तुति बनानी चाहिए?",
     wiz_q_topic_placeholder: "जैसे: 2007 होंडा सिविक एक शानदार कार क्यों है",
     wiz_topic_confirmed: "ठीक है — वेब पर \"{topic}\" के बारे में शोध कर रहा हूँ…",
-    thinking_searching: "वेब पर खोजा जा रहा है…"
+    thinking_searching: "वेब पर खोजा जा रहा है…",
+    voice_select_title: "एक आवाज़ चुनें",
+    voice_auto_label: "स्वचालित (सर्वश्रेष्ठ उपलब्ध)"
   }
 };
 

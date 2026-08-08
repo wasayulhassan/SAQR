@@ -624,6 +624,100 @@ const voiceModeStopBtn = document.getElementById("voiceModeStopBtn");
 let voiceModeActive = false;
 let voiceModeRecognition = null;
 
+// ---------- voice: which spoken voice to use ----------
+// Browsers usually ship several TTS voices per language — some sound far
+// more natural than others (e.g. Chrome's network "Google" voices vs. the
+// robotic local/eSpeak ones). We auto-pick the best-sounding match for the
+// current language, but also expose every installed voice in a dropdown
+// (in the voice-mode banner) so the user can pick a specific one — that
+// choice is remembered across visits.
+const voiceSelect = document.getElementById("voiceSelect");
+let ttsVoices = [];
+let selectedVoiceURI = localStorage.getItem("saqr_voice_uri") || "";
+
+function populateVoiceSelect(){
+  if(!voiceSelect) return;
+  const langPrefix = speechLangCode().split("-")[0];
+  const matching = ttsVoices.filter(v => v.lang && v.lang.toLowerCase().startsWith(langPrefix));
+  const list = (matching.length ? matching : ttsVoices).slice().sort((a, b) => scoreVoice(b) - scoreVoice(a));
+
+  voiceSelect.innerHTML = "";
+  const autoOpt = document.createElement("option");
+  autoOpt.value = "";
+  autoOpt.textContent = saqrT("voice_auto_label");
+  voiceSelect.appendChild(autoOpt);
+
+  list.forEach(v => {
+    const opt = document.createElement("option");
+    opt.value = v.voiceURI;
+    opt.textContent = v.name + (v.lang ? ` (${v.lang})` : "");
+    voiceSelect.appendChild(opt);
+  });
+  voiceSelect.value = (selectedVoiceURI && list.some(v => v.voiceURI === selectedVoiceURI)) ? selectedVoiceURI : "";
+}
+
+function loadTtsVoices(){
+  if(!("speechSynthesis" in window)) return;
+  ttsVoices = window.speechSynthesis.getVoices();
+  populateVoiceSelect();
+}
+
+if("speechSynthesis" in window){
+  loadTtsVoices();
+  window.speechSynthesis.onvoiceschanged = loadTtsVoices; // most browsers load voices async
+}
+
+if(voiceSelect){
+  voiceSelect.addEventListener("change", () => {
+    selectedVoiceURI = voiceSelect.value;
+    localStorage.setItem("saqr_voice_uri", selectedVoiceURI);
+  });
+}
+
+// Re-filter the voice list when the UI language changes (e.g. switching to
+// Urdu should surface Urdu voices first, if the OS/browser has any).
+// Registered inside DOMContentLoaded, same as i18n.js's own lang-switch
+// listener (registered first, since i18n.js loads before this file) — that
+// ordering guarantees saqrApplyLang() has already updated the current
+// language by the time populateVoiceSelect() reads it here.
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("#langSwitch button").forEach(btn => {
+    btn.addEventListener("click", () => populateVoiceSelect());
+  });
+});
+
+// Rates how human/natural a browser voice is likely to sound, purely from
+// its metadata (there's no way to actually hear it ahead of time). Cloud/
+// network voices and ones flagged "Natural"/"Neural" by their vendor are
+// the closest thing to a "sounds like a real assistant" signal we can go
+// on; classic offline synthesizers (eSpeak, Festival, the old low-quality
+// "Microsoft ... Desktop" SAPI voices) are the ones people usually mean by
+// "sounds like a robot", so those get pushed to the bottom instead of
+// excluded outright (still better than nothing if it's all that's there).
+function scoreVoice(v){
+  let score = 0;
+  if(v.localService === false) score += 3; // cloud-rendered — almost always the most natural option available
+  if(/neural|natural/i.test(v.name)) score += 4;
+  if(/premium|enhanced|plus|pro\b/i.test(v.name)) score += 2;
+  if(/google|online|microsoft (?!.*desktop)/i.test(v.name)) score += 1;
+  if(/espeak|festival|pico|compact|robotic|legacy/i.test(v.name)) score -= 4;
+  if(/desktop/i.test(v.name)) score -= 2; // classic offline SAPI voices — usually the robotic-sounding default
+  return score;
+}
+
+function pickBestVoice(){
+  if(!ttsVoices.length) return null;
+  if(selectedVoiceURI){
+    const chosen = ttsVoices.find(v => v.voiceURI === selectedVoiceURI);
+    if(chosen) return chosen;
+  }
+  const langPrefix = speechLangCode().split("-")[0];
+  const candidates = ttsVoices.filter(v => v.lang && v.lang.toLowerCase().startsWith(langPrefix));
+  const pool = candidates.length ? candidates : ttsVoices;
+  if(!pool.length) return null;
+  return pool.slice().sort((a, b) => scoreVoice(b) - scoreVoice(a))[0];
+}
+
 function stripMarkdownForSpeech(text){
   return String(text || "")
     .replace(/```[\s\S]*?```/g, "")
@@ -648,7 +742,9 @@ function speakText(text){
   }
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(clean);
-  utter.lang = speechLangCode();
+  const voice = pickBestVoice();
+  if(voice) utter.voice = voice;
+  utter.lang = voice ? voice.lang : speechLangCode();
   utter.onend = () => { if(voiceModeActive) startVoiceModeListening(); };
   utter.onerror = () => { if(voiceModeActive) startVoiceModeListening(); };
   window.speechSynthesis.speak(utter);
