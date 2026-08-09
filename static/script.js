@@ -1,6 +1,17 @@
+// ============================================================================
+// SAQR — three independent chat surfaces (Chat / Report & Analysis /
+// PowerPoint), each built by createChatSurface() below from a shared
+// template of behavior, with per-surface local state (messages, attached
+// file, wizard, voice) and a locally-stored (per-browser) list of past
+// conversations in its own sidebar.
+// ============================================================================
+
 // ---------- panel navigation ----------
+let chatSurfaceInstances = []; // filled in as each surface is created, used to stop voice when switching tabs
+
 document.querySelectorAll(".rail-btn").forEach(btn => {
   btn.addEventListener("click", () => {
+    chatSurfaceInstances.forEach(s => s.stopVoice());
     document.querySelectorAll(".rail-btn").forEach(b => b.classList.remove("active"));
     document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
@@ -28,34 +39,6 @@ async function checkStatus(){
   }
 }
 checkStatus();
-
-// ---------- chat ----------
-const chatWindow = document.getElementById("chatWindow");
-const chatForm = document.getElementById("chatForm");
-const chatInput = document.getElementById("chatInput");
-let chatHistory = [];
-
-// ---------- web search toggle ----------
-// Either the user turns this on for the next message (🌐 button), or the
-// message itself implies it needs current information — either way the
-// client calls /api/web_search before /api/chat and feeds the results in.
-const webSearchBtn = document.getElementById("webSearchBtn");
-let webSearchActive = false;
-const WEB_SEARCH_TRIGGER_RE = /\b(search( the web| online)?|look ?up|google|find (out|info|information) about|what'?s the (latest|current|newest)|current (price|status|news|weather|version)|latest news|who is the (current )?(ceo|president|prime minister)|as of (today|now|202\d)|right now|these days|nowadays|today'?s)\b/i;
-
-webSearchBtn.addEventListener("click", () => {
-  webSearchActive = !webSearchActive;
-  webSearchBtn.classList.toggle("is-active", webSearchActive);
-});
-
-// ---------- voice: shared helpers ----------
-const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-function speechLangCode(){
-  const lang = (typeof SAQR_CURRENT_LANG !== "undefined" && SAQR_CURRENT_LANG) || "en";
-  const map = { en: "en-US", ar: "ar-SA", ur: "ur-PK", hi: "hi-IN" };
-  return map[lang] || "en-US";
-}
 
 // ---------- lightweight markdown rendering for bot replies ----------
 // Model replies come back as markdown-ish text (bold, lists, paragraphs).
@@ -135,574 +118,130 @@ function renderMarkdown(raw){
   return htmlBlocks.join("") || `<p>${renderInline(raw)}</p>`;
 }
 
-function addMsg(text, who, sources){
-  const div = document.createElement("div");
-  div.className = "msg " + (who === "user" ? "msg-user" : "msg-bot");
-  const tag = document.createElement("span");
-  tag.className = "msg-tag";
-  tag.textContent = who === "user" ? t("you_tag") : "SAQR";
-  div.appendChild(tag);
+// ---------- shared: web search trigger ----------
+const WEB_SEARCH_TRIGGER_RE = /\b(search( the web| online)?|look ?up|google|find (out|info|information) about|what'?s the (latest|current|newest)|current (price|status|news|weather|version)|latest news|who is the (current )?(ceo|president|prime minister)|as of (today|now|202\d)|right now|these days|nowadays|today'?s)\b/i;
 
-  const body = document.createElement("div");
-  body.className = "msg-body";
-  if(who === "user"){
-    body.textContent = text; // user input stays plain, no markdown parsing needed
-  } else {
-    body.innerHTML = renderMarkdown(text);
-  }
+// ---------- shared: weather (browser geolocation + a free weather API) ----------
+const WEATHER_TRIGGER_RE = /\b(weather|temperature outside|is it raining|is it snowing|how (hot|cold) (is it|out)|forecast)\b/i;
+const WEATHER_CODES = {
+  0: "clear sky", 1: "mostly clear", 2: "partly cloudy", 3: "overcast",
+  45: "fog", 48: "depositing rime fog",
+  51: "light drizzle", 53: "moderate drizzle", 55: "dense drizzle",
+  61: "light rain", 63: "moderate rain", 65: "heavy rain",
+  71: "light snow", 73: "moderate snow", 75: "heavy snow",
+  80: "light rain showers", 81: "moderate rain showers", 82: "violent rain showers",
+  95: "thunderstorm", 96: "thunderstorm with hail", 99: "thunderstorm with heavy hail",
+};
 
-  if(sources && sources.length){
-    const srcWrap = document.createElement("div");
-    srcWrap.className = "msg-sources";
-    sources.slice(0, 5).forEach((s, i) => {
-      const a = document.createElement("a");
-      a.href = s.url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      let host = s.url;
-      try{ host = new URL(s.url).hostname.replace(/^www\./, ""); }catch(e){}
-      a.textContent = `[${i + 1}] ${host}`;
-      srcWrap.appendChild(a);
-    });
-    body.appendChild(srcWrap);
-  }
+let cachedLocation = null; // {lat, lon, city} — cached for the page session so we only prompt once
 
-  div.appendChild(body);
-  chatWindow.appendChild(div);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-}
-
-// ---------- unified message submission ----------
-// Used by the normal Send button, by voice mode's auto-submit after
-// transcription, and by the presentation trigger phrase — one path so
-// wizard interception / web search / history stay consistent everywhere.
-async function submitChatMessage(message){
-  message = (message || "").trim();
-  if(!message) return;
-
-  // ---- presentation wizard interception ----
-  if(ppWizard){
-    if(/^(cancel|stop|nevermind|never mind)$/i.test(message)){
-      addMsg(message, "user");
-      cancelWizard();
-      return;
-    }
-    const step = ppWizard.steps[ppWizard.stepIndex];
-    if(step.type === "choice"){
-      const matched = step.choices.find(c =>
-        c.value.toLowerCase() === message.toLowerCase() ||
-        saqrT(c.labelKey).toLowerCase() === message.toLowerCase()
-      );
-      if(matched){
-        handleWizardAnswer(matched.value, saqrT(matched.labelKey));
-      } else {
-        addMsg(message, "user");
-        addMsg(saqrT("wiz_pick_option"), "bot");
-      }
-      return;
-    }
-    // free-text step
-    handleWizardAnswer(message, message);
-    return;
-  }
-
-  if(!ppWizard && PRESENTATION_TRIGGER_RE.test(message)){
-    addMsg(message, "user");
-    startWizard(message);
-    return;
-  }
-
-  addMsg(message, "user");
-  chatHistory.push({role:"user", content:message});
-
-  const thinking = document.createElement("div");
-  thinking.className = "msg msg-bot";
-  thinking.innerHTML = '<span class="msg-tag">SAQR</span><div class="msg-body"><span class="typing-dots"><span></span><span></span><span></span></span></div>';
-  chatWindow.appendChild(thinking);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-
-  // ---- web search for this turn, if toggled on or implied by the message ----
-  let webResults = null;
-  const shouldSearch = webSearchActive || WEB_SEARCH_TRIGGER_RE.test(message);
-  if(shouldSearch){
-    if(webSearchActive){ webSearchActive = false; webSearchBtn.classList.remove("is-active"); }
-    thinking.querySelector(".msg-body").innerHTML =
-      saqrT("thinking_searching") + ' <span class="typing-dots"><span></span><span></span><span></span></span>';
-    try{
-      const sres = await fetch("/api/web_search", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ query: message })
-      });
-      const sdata = await sres.json();
-      if(sdata.ok && sdata.results && sdata.results.length) webResults = sdata.results;
-    }catch(e){ /* best effort — proceed without web results */ }
-  }
-
-  try{
-    const res = await fetch("/api/chat", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({message, history: chatHistory.slice(-10), web_results: webResults})
-    });
-    const data = await res.json();
-    thinking.remove();
-    addMsg(data.reply, "bot", webResults);
-    chatHistory.push({role:"assistant", content:data.reply});
-    if(voiceModeActive) speakText(data.reply);
-  }catch(err){
-    thinking.remove();
-    addMsg("⚠️ Couldn't reach the server.", "bot");
-  }
-}
-
-chatForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const message = chatInput.value.trim();
-  chatInput.value = "";
-  submitChatMessage(message);
-});
-
-// ---------- chat file attachment ----------
-const chatAttachBtn = document.getElementById("chatAttachBtn");
-const chatFileInput = document.getElementById("chatFileInput");
-const chatFileChip = document.getElementById("chatFileChip");
-const chatFileChipName = document.getElementById("chatFileChipName");
-const chatFileChipMeta = document.getElementById("chatFileChipMeta");
-const chatFileRemoveBtn = document.getElementById("chatFileRemoveBtn");
-
-let attachedChatFile = null; // {filename, meta}
-
-chatAttachBtn.addEventListener("click", () => chatFileInput.click());
-
-chatFileInput.addEventListener("change", async () => {
-  if(!chatFileInput.files.length) return;
-  const file = chatFileInput.files[0];
-  if(ppWizard) cancelWizard();
-
-  const thinking = document.createElement("div");
-  thinking.className = "msg msg-bot msg-file";
-  const thinkingTag = document.createElement("span");
-  thinkingTag.className = "msg-tag";
-  thinkingTag.textContent = "SAQR";
-  const thinkingBody = document.createElement("div");
-  thinkingBody.className = "msg-body";
-  thinkingBody.textContent = saqrFormat("uploading_file", {filename: file.name});
-  thinking.appendChild(thinkingTag);
-  thinking.appendChild(thinkingBody);
-  chatWindow.appendChild(thinking);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  try{
-    const res = await fetch("/api/chat_upload", { method: "POST", body: formData });
-    const data = await res.json();
-    thinking.remove();
-
-    if(!data.ok){
-      addMsg(saqrFormat("file_attach_error", {error: data.error}), "bot");
-      return;
-    }
-
-    attachedChatFile = { filename: data.filename, meta: data.meta };
-    chatFileChipName.textContent = data.filename;
-    chatFileChipMeta.textContent = data.meta;
-    chatFileChip.classList.remove("hidden");
-    chatAttachBtn.classList.add("has-file");
-
-    addMsg(saqrFormat("file_attached_msg", { filename: data.filename, meta: data.meta }), "bot");
-  }catch(err){
-    thinking.remove();
-    addMsg(saqrFormat("file_attach_error", {error: String(err)}), "bot");
-  }
-
-  chatFileInput.value = "";
-});
-
-chatFileRemoveBtn.addEventListener("click", async () => {
-  if(!attachedChatFile) return;
-  const removedName = attachedChatFile.filename;
-  try{
-    await fetch("/api/chat_file_clear", { method: "POST" });
-  }catch(err){ /* best effort */ }
-
-  attachedChatFile = null;
-  chatFileChip.classList.add("hidden");
-  chatAttachBtn.classList.remove("has-file");
-  addMsg(saqrFormat("file_removed_msg", { filename: removedName }), "bot");
-  ppWizard = null; // attaching context is gone, so any in-progress wizard no longer makes sense
-});
-
-// ---------- AI presentation wizard ----------
-// A short guided Q&A (purpose, tone, slide count, visual style) collected
-// entirely client-side, then handed to the backend in one shot to design
-// a custom deck from the attached file. Can be started via the button on
-// the file chip, or by just typing something like "make a presentation
-// from this" while a file is attached.
-const createPptBtn = document.getElementById("createPptBtn");
-
-const WIZARD_STEPS = [
-  { key: "purpose", type: "text", promptKey: "wiz_q_purpose", placeholderKey: "wiz_q_purpose_placeholder" },
-  { key: "tone", type: "choice", promptKey: "wiz_q_tone", choices: [
-      { value: "formal", labelKey: "wiz_tone_formal" },
-      { value: "casual", labelKey: "wiz_tone_casual" },
-      { value: "academic", labelKey: "wiz_tone_academic" },
-      { value: "creative", labelKey: "wiz_tone_creative" },
-    ]},
-  { key: "slide_count", type: "choice", promptKey: "wiz_q_slides", choices: [
-      { value: "5", labelKey: "wiz_slides_5" },
-      { value: "8", labelKey: "wiz_slides_8" },
-      { value: "12", labelKey: "wiz_slides_12" },
-      { value: "auto", labelKey: "wiz_slides_auto" },
-    ]},
-  { key: "style", type: "choice", promptKey: "wiz_q_style", choices: [
-      { value: "minimal", labelKey: "wiz_style_minimal" },
-      { value: "bold", labelKey: "wiz_style_bold" },
-      { value: "classic", labelKey: "wiz_style_classic" },
-      { value: "surprise", labelKey: "wiz_style_surprise" },
-    ]},
-  { key: "extra", type: "text", promptKey: "wiz_q_extra", placeholderKey: "wiz_q_extra_placeholder", skippable: true },
-];
-
-const PRESENTATION_TRIGGER_RE = /\b(make|create|build|generate|design|turn this into)\b.{0,60}\b(presentation|slides?|slide ?deck|powerpoint|ppt)\b|\b(presentation|slides?|slide ?deck|powerpoint)\b.{0,40}\b(from|based on|using|out of|for|about)\b.{0,15}\b(this|it|file|attached|attachment)\b/i;
-
-// When no file is attached, a trigger phrase like "make a presentation about
-// the 2007 Honda Civic, why it's a good car" should skip straight to web
-// research instead of asking a redundant "what's the topic?" question.
-const TOPIC_STEP = { key: "topic", type: "text", promptKey: "wiz_q_topic", placeholderKey: "wiz_q_topic_placeholder" };
-
-function extractTopicFromMessage(message){
-  const m = (message || "").match(/\b(?:presentation|slides?|slide ?deck|powerpoint|ppt)\b\s*(?:on|about|regarding|covering)\s+(.+?)[\s.!?]*$/i);
-  if(!m) return null;
-  const candidate = m[1].trim();
-  if(!candidate) return null;
-  if(/^(this|it|that|the file|my file|the attached( file)?|attached|the attachment|this file|this data|that file)$/i.test(candidate)) return null;
-  return candidate;
-}
-
-let ppWizard = null; // { stepIndex, answers: {}, steps: [] }
-
-function addWizardStepMsg(step){
-  const div = document.createElement("div");
-  div.className = "msg msg-bot";
-  const tag = document.createElement("span");
-  tag.className = "msg-tag";
-  tag.textContent = "SAQR";
-  div.appendChild(tag);
-
-  const body = document.createElement("div");
-  body.className = "msg-body";
-  body.innerHTML = renderMarkdown(saqrT(step.promptKey));
-  div.appendChild(body);
-
-  if(step.type === "choice"){
-    const choicesWrap = document.createElement("div");
-    choicesWrap.className = "wizard-choices";
-    step.choices.forEach(choice => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "wizard-choice-btn";
-      btn.textContent = saqrT(choice.labelKey);
-      btn.addEventListener("click", () => {
-        Array.from(choicesWrap.children).forEach(c => c.disabled = true);
-        handleWizardAnswer(choice.value, saqrT(choice.labelKey));
-      });
-      choicesWrap.appendChild(btn);
-    });
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "wizard-choice-btn is-cancel";
-    cancelBtn.textContent = saqrT("wiz_cancel");
-    cancelBtn.addEventListener("click", () => {
-      Array.from(choicesWrap.children).forEach(c => c.disabled = true);
-      cancelWizard();
-    });
-    choicesWrap.appendChild(cancelBtn);
-    body.appendChild(choicesWrap);
-  } else if(step.skippable){
-    const choicesWrap = document.createElement("div");
-    choicesWrap.className = "wizard-choices";
-    const skipBtn = document.createElement("button");
-    skipBtn.type = "button";
-    skipBtn.className = "wizard-choice-btn is-skip";
-    skipBtn.textContent = saqrT("wiz_skip");
-    skipBtn.addEventListener("click", () => {
-      Array.from(choicesWrap.children).forEach(c => c.disabled = true);
-      handleWizardAnswer("", saqrT("wiz_skip"));
-    });
-    choicesWrap.appendChild(skipBtn);
-    body.appendChild(choicesWrap);
-    chatInput.placeholder = saqrT(step.placeholderKey);
-  } else if(step.placeholderKey){
-    chatInput.placeholder = saqrT(step.placeholderKey);
-  }
-
-  chatWindow.appendChild(div);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-}
-
-function startWizard(triggerMessage){
-  // File attached → same guided flow as before, straight into WIZARD_STEPS.
-  // No file → this is a topic-based (web-research) deck. If the trigger
-  // phrase already named a topic ("...presentation about the 2007 Honda
-  // Civic"), skip asking for it again; otherwise insert a topic question
-  // as the first step.
-  if(attachedChatFile){
-    ppWizard = { stepIndex: 0, answers: {}, steps: WIZARD_STEPS };
-    addWizardStepMsg(WIZARD_STEPS[0]);
-    return;
-  }
-
-  const extractedTopic = extractTopicFromMessage(triggerMessage);
-  if(extractedTopic){
-    ppWizard = { stepIndex: 0, answers: { topic: extractedTopic }, steps: WIZARD_STEPS };
-    addMsg(saqrFormat("wiz_topic_confirmed", { topic: extractedTopic }), "bot");
-    addWizardStepMsg(WIZARD_STEPS[0]);
-    return;
-  }
-
-  const steps = [TOPIC_STEP, ...WIZARD_STEPS];
-  ppWizard = { stepIndex: 0, answers: {}, steps };
-  addWizardStepMsg(steps[0]);
-}
-
-function cancelWizard(){
-  ppWizard = null;
-  chatInput.placeholder = saqrT("chat_placeholder");
-  addMsg(saqrT("wiz_cancelled_msg"), "bot");
-}
-
-function handleWizardAnswer(value, displayLabel){
-  if(!ppWizard) return;
-  addMsg(displayLabel, "user");
-
-  const step = ppWizard.steps[ppWizard.stepIndex];
-  ppWizard.answers[step.key] = value;
-  ppWizard.stepIndex++;
-  chatInput.placeholder = saqrT("chat_placeholder");
-
-  const nextStep = ppWizard.steps[ppWizard.stepIndex];
-  if(nextStep){
-    addWizardStepMsg(nextStep);
-  } else {
-    runPresentationGeneration();
-  }
-}
-
-async function runPresentationGeneration(){
-  const answers = ppWizard.answers;
-  ppWizard = null;
-
-  const thinking = document.createElement("div");
-  thinking.className = "msg msg-bot";
-  thinking.innerHTML = '<span class="msg-tag">SAQR</span><div class="msg-body">'
-    + saqrT("wiz_generating")
-    + ' <span class="typing-dots"><span></span><span></span><span></span></span></div>';
-  chatWindow.appendChild(thinking);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-
-  try{
-    const res = await fetch("/api/chat_generate_presentation", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers })
-    });
-    const data = await res.json();
-    thinking.remove();
-
-    if(!data.ok){
-      addMsg(saqrFormat("wiz_error", { error: data.error }), "bot");
-      return;
-    }
-
-    addMsg(data.rationale || saqrT("wiz_download_ready"), "bot");
-
-    const div = document.createElement("div");
-    div.className = "msg msg-bot";
-    const tag = document.createElement("span");
-    tag.className = "msg-tag";
-    tag.textContent = "SAQR";
-    div.appendChild(tag);
-
-    const body = document.createElement("div");
-    body.className = "msg-body";
-    const card = document.createElement("div");
-    card.className = "ppt-result-card";
-    card.innerHTML = `
-      <div class="ppt-meta" dir="ltr">
-        <span>${saqrT("wiz_theme_label")}: <b></b></span>
-        <span>${saqrT("wiz_slides_label")}: <b></b></span>
-      </div>
-    `;
-    card.querySelectorAll("b")[0].textContent = data.theme_label || "";
-    card.querySelectorAll("b")[1].textContent = data.slide_count || "";
-    const link = document.createElement("a");
-    link.className = "ppt-download-btn";
-    link.href = data.download_url;
-    link.setAttribute("download", "");
-    link.textContent = "⬇ " + saqrT("wiz_download_btn");
-    card.appendChild(link);
-
-    if(data.sources && data.sources.length){
-      const srcWrap = document.createElement("div");
-      srcWrap.className = "msg-sources";
-      data.sources.slice(0, 5).forEach((url, i) => {
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        let host = url;
-        try{ host = new URL(url).hostname.replace(/^www\./, ""); }catch(e){}
-        a.textContent = `[${i + 1}] ${host}`;
-        srcWrap.appendChild(a);
-      });
-      card.appendChild(srcWrap);
-    }
-
-    body.appendChild(card);
-    div.appendChild(body);
-    chatWindow.appendChild(div);
-    chatWindow.scrollTop = chatWindow.scrollHeight;
-  }catch(err){
-    thinking.remove();
-    addMsg(saqrFormat("wiz_error", { error: String(err) }), "bot");
-  }
-}
-
-createPptBtn.addEventListener("click", () => {
-  if(ppWizard) return;
-  startWizard();
-});
-
-// ---------- voice: mic button (speech-to-text into the input) ----------
-const micBtn = document.getElementById("micBtn");
-let micRecognition = null;
-let micListening = false;
-
-if(SpeechRecognitionCtor){
-  micBtn.addEventListener("click", () => {
-    if(micListening){ micRecognition && micRecognition.stop(); return; }
-    micRecognition = new SpeechRecognitionCtor();
-    micRecognition.lang = speechLangCode();
-    micRecognition.interimResults = false;
-    micRecognition.maxAlternatives = 1;
-
-    micRecognition.addEventListener("result", (e) => {
-      const transcript = e.results[0][0].transcript;
-      chatInput.value = chatInput.value ? chatInput.value + " " + transcript : transcript;
-      chatInput.focus();
-    });
-    micRecognition.addEventListener("end", () => {
-      micListening = false;
-      micBtn.classList.remove("is-recording");
-    });
-    micRecognition.addEventListener("error", () => {
-      micListening = false;
-      micBtn.classList.remove("is-recording");
-    });
-
-    try{
-      micRecognition.start();
-      micListening = true;
-      micBtn.classList.add("is-recording");
-    }catch(e){ /* already running */ }
+function getLocation(){
+  if(cachedLocation) return Promise.resolve(cachedLocation);
+  if(!("geolocation" in navigator)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        let city = "";
+        try{
+          const res = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+          const data = await res.json();
+          city = data.city || data.locality || data.principalSubdivision || "";
+        }catch(e){ /* best effort — weather still works without a city name */ }
+        cachedLocation = { lat: latitude, lon: longitude, city };
+        resolve(cachedLocation);
+      },
+      () => resolve(null),                 // permission denied / unavailable
+      { timeout: 8000, maximumAge: 600000 }
+    );
   });
-} else {
-  micBtn.addEventListener("click", () => addMsg(saqrT("voice_unsupported"), "bot"));
 }
 
-// ---------- voice mode: live back-and-forth conversation ----------
-// Listens → auto-submits what it hears through the same submitChatMessage
-// path as typing → speaks the reply aloud → listens again. Runs until the
-// user hits Stop (or the banner's stop button).
-const voiceModeBtn = document.getElementById("voiceModeBtn");
-const voiceModeBanner = document.getElementById("voiceModeBanner");
-const voiceModeStatus = document.getElementById("voiceModeStatus");
-const voiceModeStopBtn = document.getElementById("voiceModeStopBtn");
+async function fetchWeather(){
+  const loc = await getLocation();
+  if(!loc) return null;
+  try{
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current_weather=true&temperature_unit=celsius&windspeed_unit=kmh`);
+    const data = await res.json();
+    const cw = data.current_weather;
+    if(!cw) return null;
+    return {
+      city: loc.city || null,
+      temperature: cw.temperature,
+      unit: "°C",
+      condition: WEATHER_CODES[cw.weathercode] || "",
+      wind_speed: cw.windspeed,
+      wind_unit: "km/h",
+    };
+  }catch(e){
+    return null;
+  }
+}
 
-let voiceModeActive = false;
-let voiceModeRecognition = null;
+// ---------- shared: voice (speech-to-text + text-to-speech) ----------
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-// ---------- voice: which spoken voice to use ----------
-// Browsers usually ship several TTS voices per language — some sound far
-// more natural than others (e.g. Chrome's network "Google" voices vs. the
-// robotic local/eSpeak ones). We auto-pick the best-sounding match for the
-// current language, but also expose every installed voice in a dropdown
-// (in the voice-mode banner) so the user can pick a specific one — that
-// choice is remembered across visits.
-const voiceSelect = document.getElementById("voiceSelect");
+function speechLangCode(){
+  const lang = (typeof SAQR_CURRENT_LANG !== "undefined" && SAQR_CURRENT_LANG) || "en";
+  const map = { en: "en-US", ar: "ar-SA", ur: "ur-PK", hi: "hi-IN" };
+  return map[lang] || "en-US";
+}
+
+// Rates how human/natural a browser voice is likely to sound, purely from
+// its metadata (there's no way to actually hear it ahead of time). Cloud/
+// network voices and ones vendors label "Natural"/"Neural" rank highest;
+// classic offline synthesizers (eSpeak, Festival, old "Desktop" SAPI
+// voices) — the ones people usually mean by "sounds like a robot" — rank
+// lowest, but aren't excluded outright in case it's all a device has.
+function scoreVoice(v){
+  let score = 0;
+  if(v.localService === false) score += 3;
+  if(/neural|natural/i.test(v.name)) score += 4;
+  if(/premium|enhanced|plus|pro\b/i.test(v.name)) score += 2;
+  if(/google|online|microsoft (?!.*desktop)/i.test(v.name)) score += 1;
+  if(/espeak|festival|pico|compact|robotic|legacy/i.test(v.name)) score -= 4;
+  if(/desktop/i.test(v.name)) score -= 2;
+  return score;
+}
+
 let ttsVoices = [];
 let selectedVoiceURI = localStorage.getItem("saqr_voice_uri") || "";
+let allVoiceSelects = []; // every <select class="voice-select"> across the 3 surfaces, kept in sync
 
-function populateVoiceSelect(){
-  if(!voiceSelect) return;
+function populateAllVoiceSelects(){
+  allVoiceSelects.forEach(populateVoiceSelect);
+}
+
+function populateVoiceSelect(selectEl){
+  if(!selectEl) return;
   const langPrefix = speechLangCode().split("-")[0];
   const matching = ttsVoices.filter(v => v.lang && v.lang.toLowerCase().startsWith(langPrefix));
   const list = (matching.length ? matching : ttsVoices).slice().sort((a, b) => scoreVoice(b) - scoreVoice(a));
 
-  voiceSelect.innerHTML = "";
+  selectEl.innerHTML = "";
   const autoOpt = document.createElement("option");
   autoOpt.value = "";
   autoOpt.textContent = saqrT("voice_auto_label");
-  voiceSelect.appendChild(autoOpt);
+  selectEl.appendChild(autoOpt);
 
   list.forEach(v => {
     const opt = document.createElement("option");
     opt.value = v.voiceURI;
     opt.textContent = v.name + (v.lang ? ` (${v.lang})` : "");
-    voiceSelect.appendChild(opt);
+    selectEl.appendChild(opt);
   });
-  voiceSelect.value = (selectedVoiceURI && list.some(v => v.voiceURI === selectedVoiceURI)) ? selectedVoiceURI : "";
+  selectEl.value = (selectedVoiceURI && list.some(v => v.voiceURI === selectedVoiceURI)) ? selectedVoiceURI : "";
 }
 
 function loadTtsVoices(){
   if(!("speechSynthesis" in window)) return;
   ttsVoices = window.speechSynthesis.getVoices();
-  populateVoiceSelect();
+  populateAllVoiceSelects();
 }
 
 if("speechSynthesis" in window){
   loadTtsVoices();
   window.speechSynthesis.onvoiceschanged = loadTtsVoices; // most browsers load voices async
-}
-
-if(voiceSelect){
-  voiceSelect.addEventListener("change", () => {
-    selectedVoiceURI = voiceSelect.value;
-    localStorage.setItem("saqr_voice_uri", selectedVoiceURI);
-  });
-}
-
-// Re-filter the voice list when the UI language changes (e.g. switching to
-// Urdu should surface Urdu voices first, if the OS/browser has any).
-// Registered inside DOMContentLoaded, same as i18n.js's own lang-switch
-// listener (registered first, since i18n.js loads before this file) — that
-// ordering guarantees saqrApplyLang() has already updated the current
-// language by the time populateVoiceSelect() reads it here.
-document.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll("#langSwitch button").forEach(btn => {
-    btn.addEventListener("click", () => populateVoiceSelect());
-  });
-});
-
-// Rates how human/natural a browser voice is likely to sound, purely from
-// its metadata (there's no way to actually hear it ahead of time). Cloud/
-// network voices and ones flagged "Natural"/"Neural" by their vendor are
-// the closest thing to a "sounds like a real assistant" signal we can go
-// on; classic offline synthesizers (eSpeak, Festival, the old low-quality
-// "Microsoft ... Desktop" SAPI voices) are the ones people usually mean by
-// "sounds like a robot", so those get pushed to the bottom instead of
-// excluded outright (still better than nothing if it's all that's there).
-function scoreVoice(v){
-  let score = 0;
-  if(v.localService === false) score += 3; // cloud-rendered — almost always the most natural option available
-  if(/neural|natural/i.test(v.name)) score += 4;
-  if(/premium|enhanced|plus|pro\b/i.test(v.name)) score += 2;
-  if(/google|online|microsoft (?!.*desktop)/i.test(v.name)) score += 1;
-  if(/espeak|festival|pico|compact|robotic|legacy/i.test(v.name)) score -= 4;
-  if(/desktop/i.test(v.name)) score -= 2; // classic offline SAPI voices — usually the robotic-sounding default
-  return score;
 }
 
 function pickBestVoice(){
@@ -733,344 +272,821 @@ function stripMarkdownForSpeech(text){
     .trim();
 }
 
-function speakText(text){
-  if(!("speechSynthesis" in window)) return;
-  const clean = stripMarkdownForSpeech(text);
-  if(!clean){
-    if(voiceModeActive) startVoiceModeListening();
-    return;
+// Re-filter every registered voice list when the UI language changes.
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("#langSwitch button").forEach(btn => {
+    btn.addEventListener("click", () => populateAllVoiceSelects());
+  });
+});
+
+// ---------- presentation wizard: shared constants ----------
+const WIZARD_STEPS = [
+  { key: "purpose", type: "text", promptKey: "wiz_q_purpose", placeholderKey: "wiz_q_purpose_placeholder" },
+  { key: "tone", type: "choice", promptKey: "wiz_q_tone", choices: [
+      { value: "formal", labelKey: "wiz_tone_formal" },
+      { value: "casual", labelKey: "wiz_tone_casual" },
+      { value: "academic", labelKey: "wiz_tone_academic" },
+      { value: "creative", labelKey: "wiz_tone_creative" },
+    ]},
+  { key: "slide_count", type: "choice", promptKey: "wiz_q_slides", choices: [
+      { value: "5", labelKey: "wiz_slides_5" },
+      { value: "8", labelKey: "wiz_slides_8" },
+      { value: "12", labelKey: "wiz_slides_12" },
+      { value: "auto", labelKey: "wiz_slides_auto" },
+    ]},
+  { key: "style", type: "choice", promptKey: "wiz_q_style", choices: [
+      { value: "minimal", labelKey: "wiz_style_minimal" },
+      { value: "bold", labelKey: "wiz_style_bold" },
+      { value: "classic", labelKey: "wiz_style_classic" },
+      { value: "surprise", labelKey: "wiz_style_surprise" },
+    ]},
+  { key: "extra", type: "text", promptKey: "wiz_q_extra", placeholderKey: "wiz_q_extra_placeholder", skippable: true },
+];
+
+const TOPIC_STEP = { key: "topic", type: "text", promptKey: "wiz_q_topic", placeholderKey: "wiz_q_topic_placeholder" };
+
+const PRESENTATION_TRIGGER_RE = /\b(make|create|build|generate|design|turn this into)\b.{0,60}\b(presentation|slides?|slide ?deck|powerpoint|ppt)\b|\b(presentation|slides?|slide ?deck|powerpoint)\b.{0,40}\b(from|based on|using|out of|for|about)\b.{0,15}\b(this|it|file|attached|attachment)\b/i;
+
+function extractTopicFromMessage(message){
+  const m = (message || "").match(/\b(?:presentation|slides?|slide ?deck|powerpoint|ppt)\b\s*(?:on|about|regarding|covering)\s+(.+?)[\s.!?]*$/i);
+  if(!m) return null;
+  const candidate = m[1].trim();
+  if(!candidate) return null;
+  if(/^(this|it|that|the file|my file|the attached( file)?|attached|the attachment|this file|this data|that file)$/i.test(candidate)) return null;
+  return candidate;
+}
+
+// ============================================================================
+// createChatSurface — builds one fully independent chat (messages, attached
+// file, wizard, voice, local history) scoped to everything inside panelEl.
+// ============================================================================
+function createChatSurface(panelEl, mode, opts){
+  opts = Object.assign({
+    enableWizard: false,       // presentation wizard (master + ppt)
+    rawMessageIsTopic: false,  // ppt: any message with no file = the topic itself
+    enableWebSearch: false,    // master only
+    enableWeather: false,      // master only
+    uploadEndpoint: "/api/chat_upload",
+  }, opts || {});
+
+  const q = (sel) => panelEl.querySelector(sel);
+
+  const chatWindow = q(".chat-window");
+  const chatForm = q(".chat-input-row");
+  const chatInput = q(".chat-input");
+  const attachBtn = q(".attach-btn");
+  const fileInput = q(".chat-file-input");
+  const fileChip = q(".chat-file-chip");
+  const chipName = q(".chip-name");
+  const chipMeta = q(".chip-meta");
+  const chipRemoveBtn = q(".chip-remove");
+  const chipPptBtn = q(".chip-ppt-btn");
+  const chipReportBtn = q(".chip-report-btn");
+  const webSearchBtn = q(".web-search-btn");
+  const micBtn = q(".mic-btn");
+  const voiceModeBtn = q(".voice-mode-btn");
+  const voiceModeBanner = q(".voice-mode-banner");
+  const voiceModeStatus = q(".voice-mode-status");
+  const voiceModeStopBtn = q(".voice-mode-stop");
+  const voiceSelect = q(".voice-select");
+  const historyNewBtn = q(".chat-history-new");
+  const historyListEl = q(".chat-history-list");
+  const introKey = q(".msg-bot span[data-i18n]") ? q(".msg-bot span[data-i18n]").getAttribute("data-i18n") : "chat_intro";
+
+  if(voiceSelect) allVoiceSelects.push(voiceSelect);
+
+  // ---- per-surface state ----
+  let chatMessages = [];      // [{role, content, sources, chartUrl}]
+  let attachedFile = null;    // {filename, meta}
+  let currentChatId = null;
+  let webSearchActive = false;
+  let micRecognition = null, micListening = false;
+  let voiceModeActive = false, voiceModeRecognition = null;
+  function stopVoiceLocal(){
+    stopVoiceModeInternal();
+    if(micListening){ micRecognition && micRecognition.stop(); }
   }
-  window.speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(clean);
-  const voice = pickBestVoice();
-  if(voice) utter.voice = voice;
-  utter.lang = voice ? voice.lang : speechLangCode();
-  utter.onend = () => { if(voiceModeActive) startVoiceModeListening(); };
-  utter.onerror = () => { if(voiceModeActive) startVoiceModeListening(); };
-  window.speechSynthesis.speak(utter);
-}
+  let ppWizard = null;        // { stepIndex, answers, steps }
 
-function startVoiceModeListening(){
-  if(!voiceModeActive || !SpeechRecognitionCtor) return;
-  voiceModeStatus.textContent = saqrT("voice_mode_listening");
-  let gotResult = false;
+  const historyKey = "saqr_history_" + mode;
 
-  voiceModeRecognition = new SpeechRecognitionCtor();
-  voiceModeRecognition.lang = speechLangCode();
-  voiceModeRecognition.interimResults = false;
-  voiceModeRecognition.maxAlternatives = 1;
-
-  voiceModeRecognition.addEventListener("result", (e) => {
-    const transcript = e.results[0][0].transcript;
-    if(transcript && transcript.trim()){
-      gotResult = true;
-      voiceModeStatus.textContent = saqrT("voice_mode_thinking");
-      submitChatMessage(transcript);
-    }
-  });
-  voiceModeRecognition.addEventListener("end", () => {
-    if(voiceModeActive && !gotResult){
-      setTimeout(() => { if(voiceModeActive) startVoiceModeListening(); }, 400);
-    }
-  });
-  voiceModeRecognition.addEventListener("error", (e) => {
-    if(!voiceModeActive) return;
-    if(e.error === "not-allowed" || e.error === "service-not-allowed"){
-      addMsg(saqrT("voice_mic_denied"), "bot");
-      stopVoiceMode();
-    }
-    // other errors (no-speech, aborted, network hiccups) retry via the 'end' handler above
-  });
-
-  try{ voiceModeRecognition.start(); }catch(e){ /* already running */ }
-}
-
-function stopVoiceMode(){
-  voiceModeActive = false;
-  voiceModeBanner.classList.add("hidden");
-  voiceModeBtn.classList.remove("is-active");
-  if(voiceModeRecognition){ try{ voiceModeRecognition.stop(); }catch(e){} }
-  if("speechSynthesis" in window) window.speechSynthesis.cancel();
-}
-
-function startVoiceMode(){
-  if(!SpeechRecognitionCtor || !("speechSynthesis" in window)){
-    addMsg(saqrT("voice_unsupported"), "bot");
-    return;
+  // ---------------- local per-browser chat history ----------------
+  function loadHistoryStore(){
+    try{ return JSON.parse(localStorage.getItem(historyKey) || "[]"); }catch(e){ return []; }
   }
-  if(micListening){ micRecognition && micRecognition.stop(); }
-  voiceModeActive = true;
-  voiceModeBanner.classList.remove("hidden");
-  voiceModeBtn.classList.add("is-active");
-  startVoiceModeListening();
-}
-
-voiceModeBtn.addEventListener("click", () => {
-  if(voiceModeActive){ stopVoiceMode(); } else { startVoiceMode(); }
-});
-voiceModeStopBtn.addEventListener("click", stopVoiceMode);
-
-// ---------- analyze / upload ----------
-const dropzone = document.getElementById("dropzone");
-const fileInput = document.getElementById("fileInput");
-
-dropzone.addEventListener("click", () => fileInput.click());
-dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
-dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
-dropzone.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dropzone.classList.remove("dragover");
-  if(e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
-});
-fileInput.addEventListener("change", () => {
-  if(fileInput.files.length) uploadFile(fileInput.files[0]);
-});
-
-async function uploadFile(file){
-  const formData = new FormData();
-  formData.append("file", file);
-  dropzone.querySelector(".dropzone-inner").innerHTML = "<p>Analyzing " + file.name + "…</p>";
-
-  try{
-    const res = await fetch("/api/upload", { method:"POST", body:formData });
-    const data = await res.json();
-    dropzone.querySelector(".dropzone-inner").innerHTML =
-      '<span class="dz-icon">⇪</span><p><b>' + file.name + '</b> loaded</p><p class="dz-hint">Click to analyze another file</p>';
-
-    if(!data.ok){
-      alert("Error: " + data.error);
+  function saveHistoryStore(list){
+    try{ localStorage.setItem(historyKey, JSON.stringify(list)); }catch(e){ /* storage full/unavailable — best effort */ }
+  }
+  function titleFromMessages(){
+    const firstUser = chatMessages.find(m => m.role === "user");
+    if(!firstUser || !firstUser.content) return saqrT("history_untitled");
+    const text = firstUser.content.trim();
+    return text.length > 42 ? text.slice(0, 42) + "…" : text;
+  }
+  function persistCurrentChat(){
+    if(!chatMessages.length || !currentChatId) return;
+    const list = loadHistoryStore();
+    const idx = list.findIndex(c => c.id === currentChatId);
+    const chatObj = {
+      id: currentChatId,
+      title: titleFromMessages(),
+      updatedAt: Date.now(),
+      messages: chatMessages,
+      attachedFile: attachedFile,
+    };
+    if(idx >= 0) list[idx] = chatObj; else list.unshift(chatObj);
+    list.sort((a, b) => b.updatedAt - a.updatedAt);
+    saveHistoryStore(list.slice(0, 50)); // cap so localStorage doesn't grow unbounded
+    renderHistoryList();
+  }
+  function renderHistoryList(){
+    if(!historyListEl) return;
+    const list = loadHistoryStore();
+    historyListEl.innerHTML = "";
+    if(!list.length){
+      const empty = document.createElement("div");
+      empty.className = "chat-history-empty";
+      empty.textContent = saqrT("history_empty");
+      historyListEl.appendChild(empty);
       return;
     }
-    renderAnalysis(data);
-    document.getElementById("exportNote").classList.add("hidden");
-  }catch(err){
-    alert("Upload failed: " + err);
+    list.forEach(c => {
+      const item = document.createElement("div");
+      item.className = "chat-history-item" + (c.id === currentChatId ? " active" : "");
+      const title = document.createElement("span");
+      title.className = "chi-title";
+      title.textContent = c.title || saqrT("history_untitled");
+      item.appendChild(title);
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "chi-delete";
+      del.textContent = "×";
+      del.addEventListener("click", (e) => { e.stopPropagation(); deleteChat(c.id); });
+      item.appendChild(del);
+      item.addEventListener("click", () => loadChat(c.id));
+      historyListEl.appendChild(item);
+    });
   }
-}
-
-function renderAnalysis(data){
-  document.getElementById("analysisResults").classList.remove("hidden");
-
-  // overview
-  const overview = document.getElementById("overviewStats");
-  overview.innerHTML = "";
-  const stats = [
-    {num: data.summary.rows, lbl:"rows"},
-    {num: data.summary.columns.length, lbl:"columns"},
-    {num: data.summary.numeric_columns.length, lbl:"numeric cols"},
-  ];
-  stats.forEach(s => {
-    const el = document.createElement("div");
-    el.className = "stat-item";
-    el.innerHTML = `<div class="num">${s.num}</div><div class="lbl">${s.lbl}</div>`;
-    overview.appendChild(el);
-  });
-
-  // trends
-  const trendsList = document.getElementById("trendsList");
-  trendsList.innerHTML = "";
-  Object.entries(data.trends).forEach(([col, t]) => {
-    const li = document.createElement("li");
-    if(typeof t === "object"){
-      const cls = t.direction === "upward" ? "up" : t.direction === "downward" ? "down" : "flat";
-      li.innerHTML = `<span>${col}</span><span class="${cls}">${t.direction} · ${t.pct_change_start_to_end}%</span>`;
+  function deleteChat(id){
+    saveHistoryStore(loadHistoryStore().filter(c => c.id !== id));
+    if(id === currentChatId) startNewChat();
+    else renderHistoryList();
+  }
+  function loadChat(id){
+    const chatObj = loadHistoryStore().find(c => c.id === id);
+    if(!chatObj) return;
+    stopVoiceLocal();
+    currentChatId = id;
+    chatMessages = chatObj.messages || [];
+    attachedFile = chatObj.attachedFile || null;
+    ppWizard = null;
+    updateFileChipUI();
+    chatWindow.innerHTML = "";
+    if(!chatMessages.length){
+      addIntroMessage();
     } else {
-      li.innerHTML = `<span>${col}</span><span class="flat">${t}</span>`;
+      chatMessages.forEach(m => renderBubble(m.content, m.role, { sources: m.sources, chartUrl: m.chartUrl }));
     }
-    trendsList.appendChild(li);
-  });
-
-  // anomalies
-  const anomaliesList = document.getElementById("anomaliesList");
-  anomaliesList.innerHTML = "";
-  const anomalyEntries = Object.entries(data.anomalies);
-  if(anomalyEntries.length === 0){
-    const li = document.createElement("li");
-    li.innerHTML = "<span>No significant anomalies detected</span>";
-    anomaliesList.appendChild(li);
-  } else {
-    anomalyEntries.forEach(([col, info]) => {
-      const li = document.createElement("li");
-      li.innerHTML = `<span>${col}</span><span class="down">${info.outlier_row_indices.length} outlier(s)</span>`;
-      anomaliesList.appendChild(li);
-    });
+    renderHistoryList();
+  }
+  function startNewChat(){
+    stopVoiceLocal();
+    currentChatId = null;
+    chatMessages = [];
+    attachedFile = null;
+    ppWizard = null;
+    fetch("/api/chat_file_clear", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
+    }).catch(() => {});
+    updateFileChipUI();
+    chatWindow.innerHTML = "";
+    addIntroMessage();
+    renderHistoryList();
   }
 
-  // charts
-  const chartsGrid = document.getElementById("chartsGrid");
-  chartsGrid.innerHTML = "";
-  data.chart_urls.forEach(url => {
-    const img = document.createElement("img");
-    img.src = url + "?t=" + Date.now();
-    chartsGrid.appendChild(img);
-  });
+  historyNewBtn && historyNewBtn.addEventListener("click", () => { if(!ppWizard) startNewChat(); });
 
-  // chart builder column dropdowns
-  populateChartBuilderColumns(data.summary.columns);
-}
-
-function populateChartBuilderColumns(columns){
-  const xSelect = document.getElementById("cbX");
-  const ySelect = document.getElementById("cbY");
-  xSelect.innerHTML = "";
-  ySelect.innerHTML = "";
-  columns.forEach(col => {
-    const optX = document.createElement("option");
-    optX.value = col; optX.textContent = col;
-    xSelect.appendChild(optX);
-
-    const optY = document.createElement("option");
-    optY.value = col; optY.textContent = col;
-    ySelect.appendChild(optY);
-  });
-}
-
-document.getElementById("cbGenerateBtn").addEventListener("click", async () => {
-  const output = document.getElementById("cbOutput");
-  const chartType = document.getElementById("cbType").value;
-  const xCol = document.getElementById("cbX").value;
-  const yCols = Array.from(document.getElementById("cbY").selectedOptions).map(o => o.value);
-  const title = document.getElementById("cbTitle").value;
-  const color = document.getElementById("cbColor").value;
-
-  if(!xCol || yCols.length === 0){
-    output.innerHTML = '<span class="cb-error">Pick an X column and at least one Y column.</span>';
-    return;
+  // ---------------- rendering ----------------
+  function addIntroMessage(){
+    renderBubble(saqrT(introKey), "bot", { record: false });
   }
 
-  output.textContent = "generating…";
-  try{
-    const res = await fetch("/api/chart", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({chart_type: chartType, x_col: xCol, y_cols: yCols, title, color})
+  function renderBubble(text, who, opts2){
+    opts2 = opts2 || {};
+    const div = document.createElement("div");
+    div.className = "msg " + (who === "user" ? "msg-user" : "msg-bot");
+    const tag = document.createElement("span");
+    tag.className = "msg-tag";
+    tag.textContent = who === "user" ? t("you_tag") : "SAQR";
+    div.appendChild(tag);
+
+    const body = document.createElement("div");
+    body.className = "msg-body";
+    if(who === "user"){
+      body.textContent = text;
+    } else if(text){
+      body.innerHTML = renderMarkdown(text);
+    }
+
+    if(opts2.chartUrl){
+      const img = document.createElement("img");
+      img.src = opts2.chartUrl;
+      img.className = "msg-chart";
+      img.alt = "chart";
+      body.appendChild(img);
+    }
+
+    if(opts2.sources && opts2.sources.length){
+      const srcWrap = document.createElement("div");
+      srcWrap.className = "msg-sources";
+      opts2.sources.slice(0, 5).forEach((s, i) => {
+        const a = document.createElement("a");
+        a.href = s.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        let host = s.url;
+        try{ host = new URL(s.url).hostname.replace(/^www\./, ""); }catch(e){}
+        a.textContent = `[${i + 1}] ${host}`;
+        srcWrap.appendChild(a);
+      });
+      body.appendChild(srcWrap);
+    }
+
+    div.appendChild(body);
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+
+  function addMsg(text, who, opts2){
+    opts2 = opts2 || {};
+    renderBubble(text, who, opts2);
+    if(opts2.record === false) return;
+    if(!currentChatId) currentChatId = "c" + Date.now() + Math.random().toString(36).slice(2, 8);
+    chatMessages.push({
+      role: who === "user" ? "user" : "assistant",
+      content: text,
+      sources: opts2.sources || null,
+      chartUrl: opts2.chartUrl || null,
     });
-    const data = await res.json();
-    if(!data.ok){
-      output.innerHTML = `<span class="cb-error">${data.error}</span>`;
+    persistCurrentChat();
+  }
+
+  function appendDownloadCard(url, label){
+    const div = document.createElement("div");
+    div.className = "msg msg-bot";
+    const tag = document.createElement("span");
+    tag.className = "msg-tag"; tag.textContent = "SAQR";
+    div.appendChild(tag);
+    const body = document.createElement("div");
+    body.className = "msg-body";
+    const card = document.createElement("div");
+    card.className = "ppt-result-card";
+    const link = document.createElement("a");
+    link.className = "ppt-download-btn";
+    link.href = url;
+    link.setAttribute("download", "");
+    link.textContent = "⬇ " + label;
+    card.appendChild(link);
+    body.appendChild(card);
+    div.appendChild(body);
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    if(!currentChatId) currentChatId = "c" + Date.now() + Math.random().toString(36).slice(2, 8);
+    chatMessages.push({ role: "assistant", content: `⬇ ${label}: ${url}` });
+    persistCurrentChat();
+  }
+
+  // ---------------- sending a message ----------------
+  async function submitChatMessage(message){
+    message = (message || "").trim();
+    if(!message) return;
+
+    if(opts.enableWizard){
+      if(ppWizard){
+        if(/^(cancel|stop|nevermind|never mind)$/i.test(message)){
+          addMsg(message, "user");
+          cancelWizard();
+          return;
+        }
+        const step = ppWizard.steps[ppWizard.stepIndex];
+        if(step.type === "choice"){
+          const matched = step.choices.find(c =>
+            c.value.toLowerCase() === message.toLowerCase() ||
+            saqrT(c.labelKey).toLowerCase() === message.toLowerCase()
+          );
+          if(matched){
+            handleWizardAnswer(matched.value, saqrT(matched.labelKey));
+          } else {
+            addMsg(message, "user");
+            addMsg(saqrT("wiz_pick_option"), "bot");
+          }
+          return;
+        }
+        handleWizardAnswer(message, message);
+        return;
+      }
+
+      if(mode === "ppt"){
+        // Every message here is presentation intent — no trigger phrase needed.
+        addMsg(message, "user");
+        startWizard(message);
+        return;
+      }
+      if(PRESENTATION_TRIGGER_RE.test(message)){
+        addMsg(message, "user");
+        startWizard(message);
+        return;
+      }
+    }
+
+    addMsg(message, "user");
+
+    const thinking = document.createElement("div");
+    thinking.className = "msg msg-bot";
+    thinking.innerHTML = '<span class="msg-tag">SAQR</span><div class="msg-body"><span class="typing-dots"><span></span><span></span><span></span></span></div>';
+    chatWindow.appendChild(thinking);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    let webResults = null;
+    if(opts.enableWebSearch && webSearchBtn){
+      const shouldSearch = webSearchActive || WEB_SEARCH_TRIGGER_RE.test(message);
+      if(shouldSearch){
+        if(webSearchActive){ webSearchActive = false; webSearchBtn.classList.remove("is-active"); }
+        thinking.querySelector(".msg-body").innerHTML =
+          saqrT("thinking_searching") + ' <span class="typing-dots"><span></span><span></span><span></span></span>';
+        try{
+          const sres = await fetch("/api/web_search", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: message }),
+          });
+          const sdata = await sres.json();
+          if(sdata.ok && sdata.results && sdata.results.length) webResults = sdata.results;
+        }catch(e){ /* best effort */ }
+      }
+    }
+
+    let weather = null;
+    if(opts.enableWeather && WEATHER_TRIGGER_RE.test(message)){
+      thinking.querySelector(".msg-body").innerHTML =
+        saqrT("thinking_weather") + ' <span class="typing-dots"><span></span><span></span><span></span></span>';
+      weather = await fetchWeather();
+    }
+
+    const historyForApi = chatMessages.slice(-10).map(m => ({ role: m.role, content: m.content }));
+
+    try{
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, history: historyForApi, web_results: webResults, weather, mode }),
+      });
+      const data = await res.json();
+      thinking.remove();
+      addMsg(data.reply, "bot", { sources: webResults, chartUrl: data.chart_url });
+      if(voiceModeActive) speakText(data.reply);
+    }catch(err){
+      thinking.remove();
+      addMsg("⚠️ Couldn't reach the server.", "bot");
+    }
+  }
+
+  chatForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const message = chatInput.value.trim();
+    chatInput.value = "";
+    submitChatMessage(message);
+  });
+
+  // ---------------- file attach ----------------
+  function updateFileChipUI(){
+    if(!fileChip) return;
+    if(attachedFile){
+      if(chipName) chipName.textContent = attachedFile.filename;
+      if(chipMeta) chipMeta.textContent = attachedFile.meta;
+      fileChip.classList.remove("hidden");
+      if(attachBtn) attachBtn.classList.add("has-file");
+    } else {
+      fileChip.classList.add("hidden");
+      if(attachBtn) attachBtn.classList.remove("has-file");
+      if(chipReportBtn) chipReportBtn.classList.add("hidden");
+    }
+  }
+
+  attachBtn && fileInput && attachBtn.addEventListener("click", () => fileInput.click());
+
+  fileInput && fileInput.addEventListener("change", async () => {
+    if(!fileInput.files.length) return;
+    const file = fileInput.files[0];
+    if(ppWizard) cancelWizard();
+
+    const thinking = document.createElement("div");
+    thinking.className = "msg msg-bot msg-file";
+    thinking.innerHTML = '<span class="msg-tag">SAQR</span><div class="msg-body"></div>';
+    thinking.querySelector(".msg-body").textContent = saqrFormat("uploading_file", { filename: file.name });
+    chatWindow.appendChild(thinking);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    const formData = new FormData();
+    formData.append("file", file);
+    if(opts.uploadEndpoint === "/api/chat_upload") formData.append("mode", mode);
+
+    try{
+      const res = await fetch(opts.uploadEndpoint, { method: "POST", body: formData });
+      const data = await res.json();
+      thinking.remove();
+
+      if(!data.ok){
+        addMsg(saqrFormat("file_attach_error", { error: data.error }), "bot");
+        return;
+      }
+
+      attachedFile = { filename: data.filename, meta: data.meta };
+      updateFileChipUI();
+      addMsg(saqrFormat("file_attached_msg", { filename: data.filename, meta: data.meta }), "bot");
+
+      if(mode === "report"){
+        if(chipReportBtn) chipReportBtn.classList.toggle("hidden", !data.trends);
+        if(data.chart_urls && data.chart_urls.length){
+          data.chart_urls.forEach(url => addMsg("", "bot", { chartUrl: url }));
+        }
+      }
+
+      if(mode === "ppt"){
+        // the whole point of this chat is decks — kick the wizard off right away
+        startWizard();
+      }
+    }catch(err){
+      thinking.remove();
+      addMsg(saqrFormat("file_attach_error", { error: String(err) }), "bot");
+    }
+
+    fileInput.value = "";
+  });
+
+  chipRemoveBtn && chipRemoveBtn.addEventListener("click", async () => {
+    if(!attachedFile) return;
+    const removedName = attachedFile.filename;
+    try{
+      await fetch("/api/chat_file_clear", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
+      });
+    }catch(err){ /* best effort */ }
+    attachedFile = null;
+    updateFileChipUI();
+    addMsg(saqrFormat("file_removed_msg", { filename: removedName }), "bot");
+    ppWizard = null;
+  });
+
+  // ---------------- Report & Analysis: generate Word report ----------------
+  chipReportBtn && chipReportBtn.addEventListener("click", async () => {
+    chipReportBtn.disabled = true;
+    try{
+      const res = await fetch("/api/report_generate", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if(!data.ok){
+        addMsg(saqrFormat("report_error", { error: data.error }), "bot");
+      } else {
+        addMsg(saqrT("report_ready_msg"), "bot");
+        appendDownloadCard(data.download_url, saqrT("report_download_btn"));
+      }
+    }catch(err){
+      addMsg(saqrFormat("report_error", { error: String(err) }), "bot");
+    }
+    chipReportBtn.disabled = false;
+  });
+
+  // ---------------- presentation wizard (master + ppt) ----------------
+  function addWizardStepMsg(step){
+    const div = document.createElement("div");
+    div.className = "msg msg-bot";
+    const tag = document.createElement("span");
+    tag.className = "msg-tag";
+    tag.textContent = "SAQR";
+    div.appendChild(tag);
+
+    const body = document.createElement("div");
+    body.className = "msg-body";
+    body.innerHTML = renderMarkdown(saqrT(step.promptKey));
+    div.appendChild(body);
+
+    if(step.type === "choice"){
+      const choicesWrap = document.createElement("div");
+      choicesWrap.className = "wizard-choices";
+      step.choices.forEach(choice => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "wizard-choice-btn";
+        btn.textContent = saqrT(choice.labelKey);
+        btn.addEventListener("click", () => {
+          Array.from(choicesWrap.children).forEach(c => c.disabled = true);
+          handleWizardAnswer(choice.value, saqrT(choice.labelKey));
+        });
+        choicesWrap.appendChild(btn);
+      });
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "wizard-choice-btn is-cancel";
+      cancelBtn.textContent = saqrT("wiz_cancel");
+      cancelBtn.addEventListener("click", () => {
+        Array.from(choicesWrap.children).forEach(c => c.disabled = true);
+        cancelWizard();
+      });
+      choicesWrap.appendChild(cancelBtn);
+      body.appendChild(choicesWrap);
+    } else if(step.skippable){
+      const choicesWrap = document.createElement("div");
+      choicesWrap.className = "wizard-choices";
+      const skipBtn = document.createElement("button");
+      skipBtn.type = "button";
+      skipBtn.className = "wizard-choice-btn is-skip";
+      skipBtn.textContent = saqrT("wiz_skip");
+      skipBtn.addEventListener("click", () => {
+        Array.from(choicesWrap.children).forEach(c => c.disabled = true);
+        handleWizardAnswer("", saqrT("wiz_skip"));
+      });
+      choicesWrap.appendChild(skipBtn);
+      body.appendChild(choicesWrap);
+      chatInput.placeholder = saqrT(step.placeholderKey);
+    } else if(step.placeholderKey){
+      chatInput.placeholder = saqrT(step.placeholderKey);
+    }
+
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+
+  function startWizard(triggerMessage){
+    if(attachedFile){
+      ppWizard = { stepIndex: 0, answers: {}, steps: WIZARD_STEPS };
+      addWizardStepMsg(WIZARD_STEPS[0]);
       return;
     }
-    output.innerHTML = `
-      <img src="${data.url}?t=${Date.now()}">
-      <br><a class="cb-download" href="${data.url}" download>Download image</a>
-    `;
-  }catch(err){
-    output.innerHTML = `<span class="cb-error">Request failed: ${err}</span>`;
-  }
-});
 
-// ---------- solve ----------
-const solveTabs = document.querySelectorAll(".solve-tab");
-const solveSimple = document.getElementById("solveSimple");
-const solveOptimize = document.getElementById("solveOptimize");
-let currentSolveMode = "equation";
-
-solveTabs.forEach(tab => {
-  tab.addEventListener("click", () => {
-    solveTabs.forEach(t => t.classList.remove("active"));
-    tab.classList.add("active");
-    currentSolveMode = tab.dataset.mode;
-    if(currentSolveMode === "optimize"){
-      solveSimple.classList.add("hidden");
-      solveOptimize.classList.remove("hidden");
-    } else {
-      solveSimple.classList.remove("hidden");
-      solveOptimize.classList.add("hidden");
-      const labelHint = {
-        equation: "e.g. x**2 - 4 = 0",
-        simplify: "e.g. (x**2 - 1)/(x - 1)",
-        derivative: "e.g. x**3 + 2*x",
-        integral: "e.g. 2*x + 3",
-      };
-      document.querySelector("#solveSimple .hint").textContent = labelHint[currentSolveMode] || "";
+    let extractedTopic = extractTopicFromMessage(triggerMessage);
+    if(!extractedTopic && opts.rawMessageIsTopic && triggerMessage && triggerMessage.trim()){
+      extractedTopic = triggerMessage.trim();
     }
+    if(extractedTopic){
+      ppWizard = { stepIndex: 0, answers: { topic: extractedTopic }, steps: WIZARD_STEPS };
+      addMsg(saqrFormat("wiz_topic_confirmed", { topic: extractedTopic }), "bot");
+      addWizardStepMsg(WIZARD_STEPS[0]);
+      return;
+    }
+
+    const steps = [TOPIC_STEP, ...WIZARD_STEPS];
+    ppWizard = { stepIndex: 0, answers: {}, steps };
+    addWizardStepMsg(steps[0]);
+  }
+
+  function cancelWizard(){
+    ppWizard = null;
+    chatInput.placeholder = saqrT("chat_placeholder");
+    addMsg(saqrT("wiz_cancelled_msg"), "bot");
+  }
+
+  function handleWizardAnswer(value, displayLabel){
+    if(!ppWizard) return;
+    addMsg(displayLabel, "user");
+
+    const step = ppWizard.steps[ppWizard.stepIndex];
+    ppWizard.answers[step.key] = value;
+    ppWizard.stepIndex++;
+    chatInput.placeholder = saqrT("chat_placeholder");
+
+    const nextStep = ppWizard.steps[ppWizard.stepIndex];
+    if(nextStep){
+      addWizardStepMsg(nextStep);
+    } else {
+      runPresentationGeneration();
+    }
+  }
+
+  async function runPresentationGeneration(){
+    const answers = ppWizard.answers;
+    ppWizard = null;
+
+    const thinking = document.createElement("div");
+    thinking.className = "msg msg-bot";
+    thinking.innerHTML = '<span class="msg-tag">SAQR</span><div class="msg-body">'
+      + saqrT("wiz_generating")
+      + ' <span class="typing-dots"><span></span><span></span><span></span></span></div>';
+    chatWindow.appendChild(thinking);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    try{
+      const res = await fetch("/api/chat_generate_presentation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers, mode }),
+      });
+      const data = await res.json();
+      thinking.remove();
+
+      if(!data.ok){
+        addMsg(saqrFormat("wiz_error", { error: data.error }), "bot");
+        return;
+      }
+
+      addMsg(data.rationale || saqrT("wiz_download_ready"), "bot");
+
+      const div = document.createElement("div");
+      div.className = "msg msg-bot";
+      const tag = document.createElement("span");
+      tag.className = "msg-tag";
+      tag.textContent = "SAQR";
+      div.appendChild(tag);
+
+      const body = document.createElement("div");
+      body.className = "msg-body";
+      const card = document.createElement("div");
+      card.className = "ppt-result-card";
+      card.innerHTML = `
+        <div class="ppt-meta" dir="ltr">
+          <span>${saqrT("wiz_theme_label")}: <b></b></span>
+          <span>${saqrT("wiz_slides_label")}: <b></b></span>
+        </div>
+      `;
+      card.querySelectorAll("b")[0].textContent = data.theme_label || "";
+      card.querySelectorAll("b")[1].textContent = data.slide_count || "";
+      const link = document.createElement("a");
+      link.className = "ppt-download-btn";
+      link.href = data.download_url;
+      link.setAttribute("download", "");
+      link.textContent = "⬇ " + saqrT("wiz_download_btn");
+      card.appendChild(link);
+
+      if(data.sources && data.sources.length){
+        const srcWrap = document.createElement("div");
+        srcWrap.className = "msg-sources";
+        data.sources.slice(0, 5).forEach((url, i) => {
+          const a = document.createElement("a");
+          a.href = url;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          let host = url;
+          try{ host = new URL(url).hostname.replace(/^www\./, ""); }catch(e){}
+          a.textContent = `[${i + 1}] ${host}`;
+          srcWrap.appendChild(a);
+        });
+        card.appendChild(srcWrap);
+      }
+
+      body.appendChild(card);
+      div.appendChild(body);
+      chatWindow.appendChild(div);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+
+      if(!currentChatId) currentChatId = "c" + Date.now() + Math.random().toString(36).slice(2, 8);
+      chatMessages.push({ role: "assistant", content: `⬇ ${saqrT("wiz_download_btn")}: ${data.download_url}` });
+      persistCurrentChat();
+    }catch(err){
+      thinking.remove();
+      addMsg(saqrFormat("wiz_error", { error: String(err) }), "bot");
+    }
+  }
+
+  chipPptBtn && chipPptBtn.addEventListener("click", () => {
+    if(ppWizard) return;
+    startWizard();
   });
-});
 
-document.getElementById("solveRunBtn").addEventListener("click", async () => {
-  const expr = document.getElementById("solveExpr").value.trim();
-  const varName = document.getElementById("solveVar").value.trim() || "x";
-  const output = document.getElementById("solveOutput");
-  if(!expr){ output.textContent = "Enter an expression first."; return; }
-  output.textContent = "computing…";
+  // ---------------- voice: mic button (speech-to-text into the input) ----------------
+  if(micBtn && SpeechRecognitionCtor){
+    micBtn.addEventListener("click", () => {
+      if(micListening){ micRecognition && micRecognition.stop(); return; }
+      micRecognition = new SpeechRecognitionCtor();
+      micRecognition.lang = speechLangCode();
+      micRecognition.interimResults = false;
+      micRecognition.maxAlternatives = 1;
 
-  const payloadMap = {
-    equation: {problem_type:"equation", expr_str: expr, var_str: varName},
-    simplify: {problem_type:"simplify", expr_str: expr},
-    derivative: {problem_type:"derivative", expr_str: expr, var_str: varName},
-    integral: {problem_type:"integral", expr_str: expr, var_str: varName},
+      micRecognition.addEventListener("result", (e) => {
+        const transcript = e.results[0][0].transcript;
+        chatInput.value = chatInput.value ? chatInput.value + " " + transcript : transcript;
+        chatInput.focus();
+      });
+      micRecognition.addEventListener("end", () => {
+        micListening = false;
+        micBtn.classList.remove("is-recording");
+      });
+      micRecognition.addEventListener("error", () => {
+        micListening = false;
+        micBtn.classList.remove("is-recording");
+      });
+
+      try{
+        micRecognition.start();
+        micListening = true;
+        micBtn.classList.add("is-recording");
+      }catch(e){ /* already running */ }
+    });
+  } else if(micBtn){
+    micBtn.addEventListener("click", () => addMsg(saqrT("voice_unsupported"), "bot"));
+  }
+
+  // ---------------- voice mode: live back-and-forth conversation ----------------
+  function speakText(text){
+    if(!("speechSynthesis" in window)) return;
+    const clean = stripMarkdownForSpeech(text);
+    if(!clean){
+      if(voiceModeActive) startVoiceModeListening();
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(clean);
+    const voice = pickBestVoice();
+    if(voice) utter.voice = voice;
+    utter.lang = voice ? voice.lang : speechLangCode();
+    utter.onend = () => { if(voiceModeActive) startVoiceModeListening(); };
+    utter.onerror = () => { if(voiceModeActive) startVoiceModeListening(); };
+    window.speechSynthesis.speak(utter);
+  }
+
+  function startVoiceModeListening(){
+    if(!voiceModeActive || !SpeechRecognitionCtor) return;
+    if(voiceModeStatus) voiceModeStatus.textContent = saqrT("voice_mode_listening");
+    let gotResult = false;
+
+    voiceModeRecognition = new SpeechRecognitionCtor();
+    voiceModeRecognition.lang = speechLangCode();
+    voiceModeRecognition.interimResults = false;
+    voiceModeRecognition.maxAlternatives = 1;
+
+    voiceModeRecognition.addEventListener("result", (e) => {
+      const transcript = e.results[0][0].transcript;
+      if(transcript && transcript.trim()){
+        gotResult = true;
+        if(voiceModeStatus) voiceModeStatus.textContent = saqrT("voice_mode_thinking");
+        submitChatMessage(transcript);
+      }
+    });
+    voiceModeRecognition.addEventListener("end", () => {
+      if(voiceModeActive && !gotResult){
+        setTimeout(() => { if(voiceModeActive) startVoiceModeListening(); }, 400);
+      }
+    });
+    voiceModeRecognition.addEventListener("error", (e) => {
+      if(!voiceModeActive) return;
+      if(e.error === "not-allowed" || e.error === "service-not-allowed"){
+        addMsg(saqrT("voice_mic_denied"), "bot");
+        stopVoiceModeInternal();
+      }
+    });
+
+    try{ voiceModeRecognition.start(); }catch(e){ /* already running */ }
+  }
+
+  function stopVoiceModeInternal(){
+    voiceModeActive = false;
+    if(voiceModeBanner) voiceModeBanner.classList.add("hidden");
+    if(voiceModeBtn) voiceModeBtn.classList.remove("is-active");
+    if(voiceModeRecognition){ try{ voiceModeRecognition.stop(); }catch(e){} }
+    if("speechSynthesis" in window) window.speechSynthesis.cancel();
+  }
+
+  function startVoiceModeInternal(){
+    if(!SpeechRecognitionCtor || !("speechSynthesis" in window)){
+      addMsg(saqrT("voice_unsupported"), "bot");
+      return;
+    }
+    if(micListening){ micRecognition && micRecognition.stop(); }
+    voiceModeActive = true;
+    if(voiceModeBanner) voiceModeBanner.classList.remove("hidden");
+    if(voiceModeBtn) voiceModeBtn.classList.add("is-active");
+    startVoiceModeListening();
+  }
+
+  voiceModeBtn && voiceModeBtn.addEventListener("click", () => {
+    if(voiceModeActive){ stopVoiceModeInternal(); } else { startVoiceModeInternal(); }
+  });
+  voiceModeStopBtn && voiceModeStopBtn.addEventListener("click", stopVoiceModeInternal);
+
+  webSearchBtn && webSearchBtn.addEventListener("click", () => {
+    webSearchActive = !webSearchActive;
+    webSearchBtn.classList.toggle("is-active", webSearchActive);
+  });
+
+  // ---------------- init ----------------
+  renderHistoryList();
+
+  return {
+    stopVoice: stopVoiceLocal,
   };
-
-  try{
-    const res = await fetch("/api/solve", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify(payloadMap[currentSolveMode])
-    });
-    const data = await res.json();
-    if(!data.ok){ output.textContent = "Error: " + data.error; return; }
-    if(currentSolveMode === "equation"){
-      output.textContent = "Solutions: " + JSON.stringify(data.solutions);
-    } else {
-      output.textContent = "Result: " + data.result;
-    }
-  }catch(err){
-    output.textContent = "Request failed: " + err;
-  }
-});
-
-document.getElementById("optimizeRunBtn").addEventListener("click", async () => {
-  const output = document.getElementById("optimizeOutput");
-  const cRaw = document.getElementById("optC").value.trim();
-  const aRaw = document.getElementById("optA").value.trim();
-  if(!cRaw || !aRaw){ output.textContent = "Fill in both fields."; return; }
-
-  const c = cRaw.split(",").map(Number);
-  const lines = aRaw.split("\n").map(l => l.trim()).filter(Boolean);
-  const A_ub = [], b_ub = [];
-  for(const line of lines){
-    const [coefPart, rhsPart] = line.split("|");
-    A_ub.push(coefPart.split(",").map(Number));
-    b_ub.push(Number(rhsPart));
-  }
-
-  output.textContent = "computing…";
-  try{
-    const res = await fetch("/api/solve", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({problem_type:"optimize", c, A_ub, b_ub, maximize:true})
-    });
-    const data = await res.json();
-    if(!data.ok){ output.textContent = "Error: " + data.error; return; }
-    output.textContent = `x = ${JSON.stringify(data.x)}\nObjective value = ${data.objective_value}`;
-  }catch(err){
-    output.textContent = "Request failed: " + err;
-  }
-});
-
-// ---------- export ----------
-async function generateExport(kind){
-  const titleInput = document.getElementById(kind === "report" ? "reportTitle" : "pptTitle");
-  const statusEl = document.getElementById(kind === "report" ? "reportStatus" : "pptStatus");
-  statusEl.textContent = "generating…";
-  try{
-    const res = await fetch("/api/" + kind, {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({title: titleInput.value})
-    });
-    const data = await res.json();
-    if(!data.ok){ statusEl.textContent = "Error: " + data.error; return; }
-    statusEl.innerHTML = `Ready → <a href="${data.download_url}" style="color:var(--amber)">Download</a>`;
-  }catch(err){
-    statusEl.textContent = "Request failed: " + err;
-  }
 }
 
-document.getElementById("reportBtn").addEventListener("click", () => generateExport("report"));
-document.getElementById("pptBtn").addEventListener("click", () => generateExport("ppt"));
-
-// ---------- dashboard quick actions ----------
-document.querySelectorAll(".qa-card[data-goto]").forEach(card => {
-  card.addEventListener("click", () => {
-    const target = document.querySelector('.rail-btn[data-panel="' + card.dataset.goto + '"]');
-    if(target) target.click();
-  });
-});
+// ============================================================================
+// Instantiate the three surfaces
+// ============================================================================
+chatSurfaceInstances = [
+  createChatSurface(document.getElementById("panel-chat"), "master", {
+    enableWizard: true, enableWebSearch: true, enableWeather: true,
+    uploadEndpoint: "/api/chat_upload",
+  }),
+  createChatSurface(document.getElementById("panel-report"), "report", {
+    enableWizard: false, uploadEndpoint: "/api/report_upload",
+  }),
+  createChatSurface(document.getElementById("panel-ppt"), "ppt", {
+    enableWizard: true, rawMessageIsTopic: true, uploadEndpoint: "/api/chat_upload",
+  }),
+];
