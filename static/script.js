@@ -119,7 +119,24 @@ function renderMarkdown(raw){
 }
 
 // ---------- shared: web search trigger ----------
-const WEB_SEARCH_TRIGGER_RE = /\b(search( the web| online)?|look ?up|google|find (out|info|information) about|what'?s the (latest|current|newest)|current (price|status|news|weather|version)|latest news|who is the (current )?(ceo|president|prime minister)|as of (today|now|202\d)|right now|these days|nowadays|today'?s)\b/i;
+// Broad on purpose — this decides whether SAQR actually reaches out to the
+// web before answering, so it's better to search a little too often than to
+// miss a question that needed live data and let the model guess/hallucinate.
+const WEB_SEARCH_TRIGGER_RE = /\b(search( the web| online)?|look ?up|google|find (out|info|information) about|what'?s (the )?(latest|current|newest|recent)|current (price|status|news|weather|version|events?)|latest (news|update|updates|version|release|info|information)|recent(ly)?|up[- ]?to[- ]?date|breaking news|who (is|are) the (current )?(ceo|president|prime minister|leader)|as of (today|now|this (week|month|year))|right now|these days|nowadays|today'?s|this (week|month|year)|real[- ]?time|live (score|update|data)|what'?s happening|what happened (to|with|in)|(stock|share) price|exchange rate|weather (in|today|forecast)|election results?|just (announced|released|launched)|newly released|any (news|updates?) (on|about)|has .* (happened|changed|launched|released))\b/i;
+
+// Beyond the phrase-based regex above, any year mention close to "now" reads
+// as a request for current information too ("updates from 2026", "in 2025")
+// — catches natural phrasing the trigger phrases above don't cover.
+function messageWantsLiveData(message){
+  if(WEB_SEARCH_TRIGGER_RE.test(message)) return true;
+  const yearMatch = message.match(/\b(20[0-9]{2})\b/);
+  if(yearMatch){
+    const thisYear = new Date().getFullYear();
+    const y = parseInt(yearMatch[1], 10);
+    if(y >= thisYear - 1 && y <= thisYear + 1) return true;
+  }
+  return false;
+}
 
 // ---------- shared: weather (browser geolocation + a free weather API) ----------
 const WEATHER_TRIGGER_RE = /\b(weather|temperature outside|is it raining|is it snowing|how (hot|cold) (is it|out)|forecast)\b/i;
@@ -609,10 +626,14 @@ function createChatSurface(panelEl, mode, opts){
     chatWindow.scrollTop = chatWindow.scrollHeight;
 
     let webResults = null;
-    if(opts.enableWebSearch && webSearchBtn){
-      const shouldSearch = webSearchActive || WEB_SEARCH_TRIGGER_RE.test(message);
+    if(opts.enableWebSearch){
+      // The manual toggle (master chat only) always forces a search; beyond
+      // that, auto-detect from the message itself so live-data questions get
+      // searched even without the toggle, and in chats with no toggle button
+      // at all (Report & Analysis, PowerPoint).
+      const shouldSearch = webSearchActive || messageWantsLiveData(message);
       if(shouldSearch){
-        if(webSearchActive){ webSearchActive = false; webSearchBtn.classList.remove("is-active"); }
+        if(webSearchActive){ webSearchActive = false; webSearchBtn && webSearchBtn.classList.remove("is-active"); }
         thinking.querySelector(".msg-body").innerHTML =
           saqrT("thinking_searching") + ' <span class="typing-dots"><span></span><span></span><span></span></span>';
         try{
@@ -1084,9 +1105,9 @@ chatSurfaceInstances = [
     uploadEndpoint: "/api/chat_upload",
   }),
   createChatSurface(document.getElementById("panel-report"), "report", {
-    enableWizard: false, uploadEndpoint: "/api/report_upload",
+    enableWizard: false, enableWebSearch: true, uploadEndpoint: "/api/report_upload",
   }),
   createChatSurface(document.getElementById("panel-ppt"), "ppt", {
-    enableWizard: true, rawMessageIsTopic: true, uploadEndpoint: "/api/chat_upload",
+    enableWizard: true, rawMessageIsTopic: true, enableWebSearch: true, uploadEndpoint: "/api/chat_upload",
   }),
 ];
