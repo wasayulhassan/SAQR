@@ -541,6 +541,14 @@ function createChatSurface(panelEl, mode, opts){
   function addMsg(text, who, opts2){
     opts2 = opts2 || {};
     renderBubble(text, who, opts2);
+    // Single source of truth for "speak the reply, then resume listening" —
+    // every bot message goes through here (wizard steps are the one
+    // exception, handled separately in addWizardStepMsg), so voice mode
+    // keeps going through wizard/report/file-upload replies too, not just
+    // the plain chat path. Without this, voice mode would go silent and
+    // stop listening the moment a reply took any of those other paths,
+    // forcing the user to re-click the mic to continue.
+    if(who !== "user" && voiceModeActive && text && opts2.speak !== false) speakText(text);
     if(opts2.record === false) return;
     if(!currentChatId) currentChatId = "c" + Date.now() + Math.random().toString(36).slice(2, 8);
     chatMessages.push({
@@ -674,7 +682,6 @@ function createChatSurface(panelEl, mode, opts){
       const data = await res.json();
       thinking.remove();
       addMsg(data.reply, "bot", { sources: webResults, chartUrl: data.chart_url });
-      if(voiceModeActive) speakText(data.reply);
     }catch(err){
       thinking.remove();
       addMsg("⚠️ Couldn't reach the server.", "bot");
@@ -771,11 +778,19 @@ function createChatSurface(panelEl, mode, opts){
     ppWizard = null;
   });
 
+  function lastAssistantMessage(){
+    for(let i = chatMessages.length - 1; i >= 0; i--){
+      if(chatMessages[i].role === "assistant" && chatMessages[i].content) return chatMessages[i].content;
+    }
+    return "";
+  }
+
   // ---------------- generate Word report (button click OR typed request) ----------------
   // Shared by the Report & Analysis chip button and by just typing "make me
   // a word report" in either the Report or master Chat — no button needed
-  // there, the request itself is enough. The server returns a clear error
-  // if there's no spreadsheet loaded in this chat yet.
+  // there, the request itself is enough. If there's a spreadsheet loaded in
+  // this chat the server builds the full data report; otherwise it exports
+  // SAQR's last reply itself as a Word doc (see lastAssistantMessage below).
   async function requestReportGeneration(){
     if(chipReportBtn) chipReportBtn.disabled = true;
     const thinking = document.createElement("div");
@@ -787,14 +802,18 @@ function createChatSurface(panelEl, mode, opts){
     chatWindow.scrollTop = chatWindow.scrollHeight;
     try{
       const res = await fetch("/api/report_generate", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        // No spreadsheet loaded here? The server falls back to exporting
+        // the conversation's own last reply as a Word doc — send it along
+        // so that path has something to work with.
+        body: JSON.stringify({ mode, content: lastAssistantMessage() }),
       });
       const data = await res.json();
       thinking.remove();
       if(!data.ok){
         addMsg(saqrFormat("report_error", { error: data.error }), "bot");
       } else {
-        addMsg(saqrT("report_ready_msg"), "bot");
+        addMsg(saqrT(data.source === "chat" ? "chat_export_ready_msg" : "report_ready_msg"), "bot");
         appendDownloadCard(data.download_url, saqrT("report_download_btn"));
       }
     }catch(err){
@@ -864,6 +883,11 @@ function createChatSurface(panelEl, mode, opts){
 
     chatWindow.appendChild(div);
     chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    // This bypasses addMsg (wizard steps have their own buttons/DOM, not
+    // recorded into chat history the same way), so it needs its own
+    // speak-then-resume-listening call — same reason as the addMsg hook.
+    if(voiceModeActive) speakText(saqrT(step.promptKey));
   }
 
   function startWizard(triggerMessage){
@@ -879,7 +903,9 @@ function createChatSurface(panelEl, mode, opts){
     }
     if(extractedTopic){
       ppWizard = { stepIndex: 0, answers: { topic: extractedTopic }, steps: WIZARD_STEPS };
-      addMsg(saqrFormat("wiz_topic_confirmed", { topic: extractedTopic }), "bot");
+      // speak:false — addWizardStepMsg right below speaks the actual next
+      // question; without this the two would race and cut each other off
+      addMsg(saqrFormat("wiz_topic_confirmed", { topic: extractedTopic }), "bot", { speak: false });
       addWizardStepMsg(WIZARD_STEPS[0]);
       return;
     }
@@ -1036,20 +1062,34 @@ function createChatSurface(panelEl, mode, opts){
 
   // ---------------- voice mode: live back-and-forth conversation ----------------
   function speakText(text){
-    if(!("speechSynthesis" in window)) return;
+    if(!("speechSynthesis" in window)){
+      if(voiceModeActive) startVoiceModeListening();
+      return;
+    }
     const clean = stripMarkdownForSpeech(text);
     if(!clean){
       if(voiceModeActive) startVoiceModeListening();
       return;
     }
-    window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(clean);
-    const voice = pickBestVoice();
-    if(voice) utter.voice = voice;
-    utter.lang = voice ? voice.lang : speechLangCode();
-    utter.onend = () => { if(voiceModeActive) startVoiceModeListening(); };
-    utter.onerror = () => { if(voiceModeActive) startVoiceModeListening(); };
-    window.speechSynthesis.speak(utter);
+    // Speech synthesis can throw for reasons entirely outside our control —
+    // a stale/invalid voice reference, a browser-specific quirk, whatever.
+    // If that happens uncaught, it used to kill voice mode's listen loop
+    // right there (this function is called from inside addMsg, before the
+    // message even finishes recording) and the user would have to re-click
+    // the mic to get anything working again. Never let that happen — worst
+    // case, skip the narration and just keep listening.
+    try{
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(clean);
+      const voice = pickBestVoice();
+      if(voice) utter.voice = voice;
+      utter.lang = voice ? voice.lang : speechLangCode();
+      utter.onend = () => { if(voiceModeActive) startVoiceModeListening(); };
+      utter.onerror = () => { if(voiceModeActive) startVoiceModeListening(); };
+      window.speechSynthesis.speak(utter);
+    }catch(e){
+      if(voiceModeActive) startVoiceModeListening();
+    }
   }
 
   function startVoiceModeListening(){
