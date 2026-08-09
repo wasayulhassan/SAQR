@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify, render_template, send_file
 sys.path.insert(0, os.path.dirname(__file__))
 from modules import (
     chatbot, analyzer, solver, report_gen, ppt_gen, chart_builder,
-    file_context, ai_ppt, ppt_themes, web_search, report_chat,
+    file_context, ai_ppt, ppt_themes, web_search, report_chat, chat_export,
 )
 
 app = Flask(__name__)
@@ -256,22 +256,42 @@ def api_report_upload():
 
 @app.route("/api/report_generate", methods=["POST"])
 def api_report_generate():
-    """Build a Word report from whatever's currently loaded in the given
-    chat (master or report — needs a spreadsheet uploaded in that same
-    chat first, so it has real data to build from)."""
+    """Build a Word document from whatever's available in this chat. If a
+    spreadsheet was uploaded here, this builds the full data report (stats,
+    trends, anomalies, charts — see report_gen.py). Otherwise it falls back
+    to exporting the conversation's own last reply as a formatted .docx
+    (see chat_export.py) — so "make this a Word document" works whether or
+    not there's tabular data behind it, instead of failing outright."""
     data = request.get_json(silent=True) or {}
     mode = _clean_mode(data.get("mode", "report"))
+    title = data.get("title")
     analysis = CHAT_ANALYSIS.get(mode)
-    if not analysis:
+
+    if analysis:
+        file_ctx = CHAT_FILES.get(mode, {}).get("data", {})
+        default_title = f"{file_ctx.get('filename', 'Data')} — Analysis Report"
+        fpath = report_gen.build_report(analysis, title or default_title)
+        return jsonify({
+            "ok": True, "source": "data",
+            "download_url": f"/api/download/{os.path.basename(fpath)}",
+        })
+
+    content = (data.get("content") or "").strip()
+    if not content:
         return jsonify({
             "ok": False,
-            "error": "Upload a CSV or Excel file in this chat first — Word reports need tabular data",
+            "error": "Nothing to turn into a document yet — upload a CSV/Excel file for a "
+                     "full data report, or ask me something first so there's a reply to export",
         }), 400
-    file_ctx = CHAT_FILES.get(mode, {}).get("data", {})
-    default_title = f"{file_ctx.get('filename', 'Data')} — Analysis Report"
-    title = data.get("title") or default_title
-    fpath = report_gen.build_report(analysis, title)
-    return jsonify({"ok": True, "download_url": f"/api/download/{os.path.basename(fpath)}"})
+    try:
+        fpath = chat_export.build_docx_from_text(content, title or "SAQR — Chat Export")
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({
+        "ok": True, "source": "chat",
+        "download_url": f"/api/download/{os.path.basename(fpath)}",
+    })
 
 
 # ---------------------------------------------------------------------------
