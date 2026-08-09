@@ -5,15 +5,33 @@ import traceback
 from flask import Flask, request, jsonify, render_template, send_file
 
 sys.path.insert(0, os.path.dirname(__file__))
-from modules import chatbot, analyzer, solver, report_gen, ppt_gen, chart_builder, file_context, ai_ppt, ppt_themes, web_search
+from modules import (
+    chatbot, analyzer, solver, report_gen, ppt_gen, chart_builder,
+    file_context, ai_ppt, ppt_themes, web_search, report_chat,
+)
 
 app = Flask(__name__)
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Keep last analysis / attached chat file in memory (single-user local app)
+# ---------------------------------------------------------------------------
+# SAQR is one app split into three chat surfaces (mode = "master" | "report"
+# | "ppt"), each with its own attached file / analysis state so they don't
+# clash with each other. All state is single-process, in-memory (single-user
+# local app) — nothing here is a database.
+# ---------------------------------------------------------------------------
+CHAT_MODES = ("master", "report", "ppt")
+CHAT_FILES = {m: {} for m in CHAT_MODES}      # mode -> {"data": file_context-shaped dict}
+CHAT_ANALYSIS = {"report": None}              # mode "report" only -> analyzer.full_analysis() output
+
+# Kept for the legacy (currently unused by the frontend) single-page
+# analyze/report/ppt/chart routes below, so that functionality still works
+# under the hood if a future UI wants to call it again.
 LAST_ANALYSIS = {}
-CHAT_FILE = {}
+
+
+def _clean_mode(mode):
+    return mode if mode in CHAT_MODES else "master"
 
 
 @app.route("/")
@@ -43,22 +61,41 @@ def api_chat():
     data = request.get_json(force=True)
     message = data.get("message", "")
     history = data.get("history", [])
+    mode = _clean_mode(data.get("mode", "master"))
     web_results = data.get("web_results")  # client already ran /api/web_search for this turn, if triggered
+    weather = data.get("weather")          # client already fetched live weather for this turn, if triggered
+
+    chart_info = None
+    chart_url = None
+    if mode == "report" and CHAT_ANALYSIS.get("report"):
+        analysis = CHAT_ANALYSIS["report"]
+        spec = report_chat.maybe_build_chart(
+            message, analysis["dataframe"], analysis["summary"]["numeric_columns"]
+        )
+        if spec:
+            result = chart_builder.build_chart(analysis["dataframe"], **spec)
+            if result.get("ok"):
+                chart_url = result["url"]
+                chart_info = spec
+
     reply = chatbot.chat(
         message,
         history=history,
         data_context=_build_data_context(),
-        file_context=CHAT_FILE.get("data"),
+        file_context=CHAT_FILES.get(mode, {}).get("data"),
         web_context=web_results,
+        weather_context=weather,
+        mode=mode,
+        chart_info=chart_info,
     )
-    return jsonify({"reply": reply})
+    return jsonify({"reply": reply, "chart_url": chart_url})
 
 
 @app.route("/api/web_search", methods=["POST"])
 def api_web_search():
-    """Free, no-key web search (DuckDuckGo) — used both to ground a single
-    chat reply in current information, and to research a topic from
-    scratch for the presentation wizard when no file is attached."""
+    """Free, no-key web search — used both to ground a single chat reply in
+    current information, and to research a topic from scratch for the
+    presentation wizard when no file is attached."""
     data = request.get_json(force=True)
     query = (data.get("query") or "").strip()
     if not query:
@@ -69,14 +106,16 @@ def api_web_search():
 
 @app.route("/api/chat_upload", methods=["POST"])
 def api_chat_upload():
-    """Attach a file directly in the Chat panel — extracts a compact,
-    model-friendly summary so the chatbot can have a real conversation
-    about it (separate from the full stats pipeline in the Analyze tab)."""
+    """Attach a file directly in the Chat or PowerPoint surface — extracts a
+    compact, model-friendly summary so the chatbot can have a real
+    conversation about it (see /api/report_upload for the Report & Analysis
+    surface, which additionally runs the full stats/chart pipeline)."""
     if "file" not in request.files:
         return jsonify({"ok": False, "error": "No file uploaded"}), 400
     f = request.files["file"]
     if f.filename == "":
         return jsonify({"ok": False, "error": "Empty filename"}), 400
+    mode = _clean_mode(request.form.get("mode", "master"))
 
     save_path = os.path.join(UPLOAD_DIR, f.filename)
     f.save(save_path)
@@ -88,7 +127,7 @@ def api_chat_upload():
         return jsonify({"ok": False, "error": str(e)}), 400
 
     ctx["save_path"] = save_path
-    CHAT_FILE["data"] = ctx
+    CHAT_FILES[mode] = {"data": ctx}
     return jsonify({
         "ok": True,
         "filename": ctx["filename"],
@@ -100,19 +139,24 @@ def api_chat_upload():
 
 @app.route("/api/chat_file_clear", methods=["POST"])
 def api_chat_file_clear():
-    CHAT_FILE.pop("data", None)
+    data = request.get_json(silent=True) or {}
+    mode = _clean_mode(data.get("mode", "master"))
+    CHAT_FILES.pop(mode, None)
+    if mode == "report":
+        CHAT_ANALYSIS["report"] = None
     return jsonify({"ok": True})
 
 
 @app.route("/api/chat_generate_presentation", methods=["POST"])
 def api_chat_generate_presentation():
-    """The chat-driven 'make me a presentation from this file' flow: takes
-    the guided-wizard answers collected client-side, asks the model for a
-    custom outline (with its own opinion/rationale), picks a visual theme,
-    builds real charts from the file's data where relevant, and generates
-    the .pptx."""
-    file_ctx = CHAT_FILE.get("data")
+    """The chat-driven 'make me a presentation' flow: takes the guided-
+    wizard answers collected client-side, asks the model for a custom
+    outline (with its own opinion/rationale), picks a visual theme, builds
+    real charts from the file's data where relevant, and generates the
+    .pptx. Used by both the PowerPoint chat and the master Chat."""
     data = request.get_json(silent=True) or {}
+    mode = _clean_mode(data.get("mode", "ppt"))
+    file_ctx = CHAT_FILES.get(mode, {}).get("data")
     answers = data.get("answers", {})
 
     if not file_ctx:
@@ -149,6 +193,95 @@ def api_chat_generate_presentation():
         "sources": file_ctx.get("sources", []),
     })
 
+
+@app.route("/api/report_upload", methods=["POST"])
+def api_report_upload():
+    """Upload for the Report & Analysis chat. Tabular files (CSV/Excel) get
+    the full analyzer pipeline — stats, trends, anomalies, and a first
+    round of auto-generated charts — so charts and a Word report can be
+    built from this conversation. Other supported file types (PDF/Word/
+    text) fall back to the lighter text extraction, so you can still have a
+    grounded conversation about them, just without chart/report generation
+    (there's no tabular data to chart)."""
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "No file uploaded"}), 400
+    f = request.files["file"]
+    if f.filename == "":
+        return jsonify({"ok": False, "error": "Empty filename"}), 400
+
+    save_path = os.path.join(UPLOAD_DIR, f.filename)
+    f.save(save_path)
+    ext = f.filename.lower().rsplit(".", 1)[-1] if "." in f.filename else ""
+
+    chart_urls = []
+    trends = None
+    anomaly_counts = None
+
+    try:
+        if ext in ("csv", "xlsx", "xls"):
+            analysis = analyzer.full_analysis(save_path)
+            CHAT_ANALYSIS["report"] = analysis
+            ctx = {
+                "type": "spreadsheet",
+                "filename": f.filename,
+                "meta": f"{analysis['summary']['rows']} rows × {len(analysis['summary']['columns'])} columns",
+                "content_text": (
+                    f"Columns: {', '.join(analysis['summary']['columns'])}\n"
+                    f"Numeric columns: {', '.join(analysis['summary']['numeric_columns']) or 'none'}"
+                ),
+                "truncated": False,
+            }
+            chart_urls = ["/static/charts/" + os.path.basename(c) for c in analysis["charts"]]
+            trends = analysis["trends"]
+            anomaly_counts = {
+                col: len(info["outlier_row_indices"]) for col, info in analysis["anomalies"].items()
+            }
+        else:
+            CHAT_ANALYSIS["report"] = None
+            ctx = file_context.extract_context(save_path, f.filename)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+    ctx["save_path"] = save_path
+    CHAT_FILES["report"] = {"data": ctx}
+
+    return jsonify({
+        "ok": True,
+        "filename": ctx["filename"],
+        "meta": ctx["meta"],
+        "type": ctx["type"],
+        "truncated": ctx["truncated"],
+        "trends": trends,
+        "anomaly_counts": anomaly_counts,
+        "chart_urls": chart_urls,
+    })
+
+
+@app.route("/api/report_generate", methods=["POST"])
+def api_report_generate():
+    """Build a Word report from whatever's currently loaded in the Report &
+    Analysis chat — needs a spreadsheet upload in that chat first."""
+    analysis = CHAT_ANALYSIS.get("report")
+    if not analysis:
+        return jsonify({
+            "ok": False,
+            "error": "Upload a CSV or Excel file in this chat first — Word reports need tabular data",
+        }), 400
+    data = request.get_json(silent=True) or {}
+    file_ctx = CHAT_FILES.get("report", {}).get("data", {})
+    default_title = f"{file_ctx.get('filename', 'Data')} — Analysis Report"
+    title = data.get("title") or default_title
+    fpath = report_gen.build_report(analysis, title)
+    return jsonify({"ok": True, "download_url": f"/api/download/{os.path.basename(fpath)}"})
+
+
+# ---------------------------------------------------------------------------
+# Legacy single-page routes (Analyze Data / Problem Solver / Reports & Decks
+# tabs). Nothing in the current UI calls these anymore now that everything
+# lives in the three chat surfaces above, but the underlying logic is kept
+# working here in case a future UI wants those standalone tools back.
+# ---------------------------------------------------------------------------
 
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
