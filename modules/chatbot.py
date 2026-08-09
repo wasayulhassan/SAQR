@@ -36,6 +36,23 @@ MODEL_CANDIDATES = [
     "microsoft/Phi-3-mini-4k-instruct:fastest",
 ]
 
+# How many tokens a reply is allowed to run to before HF cuts it off — the
+# thing that was causing replies to stop mid-sentence/mid-table. Most of the
+# candidates above have large context windows and can comfortably take the
+# full amount; Phi-3-mini-4k is the exception — "4k" is its ENTIRE context
+# window (prompt + reply combined), so asking it for 10000 completion tokens
+# on its own would just fail outright. Since it only ever gets used as a
+# last-resort fallback if the bigger models are down, give it a smaller cap
+# that actually fits instead of guaranteeing that fallback attempt fails too.
+DEFAULT_MAX_TOKENS = 10000
+MODEL_MAX_TOKENS = {
+    "microsoft/Phi-3-mini-4k-instruct:fastest": 3000,
+}
+
+
+def _max_tokens_for(model: str) -> int:
+    return MODEL_MAX_TOKENS.get(model, DEFAULT_MAX_TOKENS)
+
 SYSTEM_PROMPT = (
     "You are Saqr (صقر), a helpful assistant that lives entirely inside a "
     "chat interface — there are no separate tabs or forms, everything "
@@ -149,7 +166,7 @@ def _build_system_prompt(data_context: dict = None, file_context: dict = None, w
     return prompt
 
 
-def _call_model(model: str, messages: list, max_tokens: int = 400, temperature: float = 0.7) -> requests.Response:
+def _call_model(model: str, messages: list, max_tokens: int = DEFAULT_MAX_TOKENS, temperature: float = 0.7) -> requests.Response:
     return requests.post(
         HF_API_URL,
         headers={
@@ -157,7 +174,10 @@ def _call_model(model: str, messages: list, max_tokens: int = 400, temperature: 
             "Content-Type": "application/json",
         },
         json={"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature},
-        timeout=90,
+        # Fail over to the next candidate model reasonably quickly rather
+        # than leaving the user staring at a spinner for a minute and a
+        # half before we even try the fallback.
+        timeout=45,
     )
 
 
@@ -239,7 +259,7 @@ def chat(message: str, model: str = None, history=None, data_context: dict = Non
 
     for candidate_model in candidates:
         try:
-            resp = _call_model(candidate_model, messages)
+            resp = _call_model(candidate_model, messages, max_tokens=_max_tokens_for(candidate_model))
         except requests.exceptions.RequestException as e:
             last_error = f"Error talking to the hosted chat model: {e}"
             continue
