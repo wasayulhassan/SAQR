@@ -22,7 +22,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # ---------------------------------------------------------------------------
 CHAT_MODES = ("master", "report", "ppt")
 CHAT_FILES = {m: {} for m in CHAT_MODES}      # mode -> {"data": file_context-shaped dict}
-CHAT_ANALYSIS = {"report": None}              # mode "report" only -> analyzer.full_analysis() output
+CHAT_ANALYSIS = {}                            # mode -> analyzer.full_analysis() output, when a
+                                               # tabular file (csv/xlsx/xls) was uploaded in that chat
 
 # Kept for the legacy (currently unused by the frontend) single-page
 # analyze/report/ppt/chart routes below, so that functionality still works
@@ -67,8 +68,8 @@ def api_chat():
 
     chart_info = None
     chart_url = None
-    if mode == "report" and CHAT_ANALYSIS.get("report"):
-        analysis = CHAT_ANALYSIS["report"]
+    if CHAT_ANALYSIS.get(mode):
+        analysis = CHAT_ANALYSIS[mode]
         spec = report_chat.maybe_build_chart(
             message, analysis["dataframe"], analysis["summary"]["numeric_columns"]
         )
@@ -104,12 +105,63 @@ def api_web_search():
     return jsonify({"ok": True, "results": results, "query": query})
 
 
+def _process_chat_upload(f, mode):
+    """Shared by every 'attach a file in this chat' endpoint. Tabular files
+    (CSV/Excel) get the full analyzer pipeline — stats, trends, anomalies,
+    auto-generated charts — stored per-mode in CHAT_ANALYSIS, so that chat
+    (in ANY of the three surfaces, not just Report & Analysis) can build
+    charts on request and generate a Word report from it. Other file types
+    fall back to lighter text extraction for a grounded conversation."""
+    save_path = os.path.join(UPLOAD_DIR, f.filename)
+    f.save(save_path)
+    ext = f.filename.lower().rsplit(".", 1)[-1] if "." in f.filename else ""
+
+    chart_urls, trends, anomaly_counts = [], None, None
+
+    if ext in ("csv", "xlsx", "xls"):
+        analysis = analyzer.full_analysis(save_path)
+        CHAT_ANALYSIS[mode] = analysis
+        ctx = {
+            "type": "spreadsheet",
+            "filename": f.filename,
+            "meta": f"{analysis['summary']['rows']} rows × {len(analysis['summary']['columns'])} columns",
+            "content_text": (
+                f"Columns: {', '.join(analysis['summary']['columns'])}\n"
+                f"Numeric columns: {', '.join(analysis['summary']['numeric_columns']) or 'none'}"
+            ),
+            "truncated": False,
+        }
+        chart_urls = ["/static/charts/" + os.path.basename(c) for c in analysis["charts"]]
+        trends = analysis["trends"]
+        anomaly_counts = {
+            col: len(info["outlier_row_indices"]) for col, info in analysis["anomalies"].items()
+        }
+    else:
+        CHAT_ANALYSIS[mode] = None
+        ctx = file_context.extract_context(save_path, f.filename)
+
+    ctx["save_path"] = save_path
+    CHAT_FILES[mode] = {"data": ctx}
+
+    return {
+        "ok": True,
+        "filename": ctx["filename"],
+        "meta": ctx["meta"],
+        "type": ctx["type"],
+        "truncated": ctx["truncated"],
+        "trends": trends,
+        "anomaly_counts": anomaly_counts,
+        "chart_urls": chart_urls,
+    }
+
+
 @app.route("/api/chat_upload", methods=["POST"])
 def api_chat_upload():
-    """Attach a file directly in the Chat or PowerPoint surface — extracts a
-    compact, model-friendly summary so the chatbot can have a real
-    conversation about it (see /api/report_upload for the Report & Analysis
-    surface, which additionally runs the full stats/chart pipeline)."""
+    """Attach a file directly in the Chat or PowerPoint surface. If it's a
+    spreadsheet, this now runs the same full analysis pipeline as Report &
+    Analysis (see _process_chat_upload) — so a spreadsheet attached in the
+    master Chat can also get charts and a Word report generated from it,
+    right there in the conversation."""
     if "file" not in request.files:
         return jsonify({"ok": False, "error": "No file uploaded"}), 400
     f = request.files["file"]
@@ -117,24 +169,13 @@ def api_chat_upload():
         return jsonify({"ok": False, "error": "Empty filename"}), 400
     mode = _clean_mode(request.form.get("mode", "master"))
 
-    save_path = os.path.join(UPLOAD_DIR, f.filename)
-    f.save(save_path)
-
     try:
-        ctx = file_context.extract_context(save_path, f.filename)
+        result = _process_chat_upload(f, mode)
     except Exception as e:
         traceback.print_exc()
         return jsonify({"ok": False, "error": str(e)}), 400
 
-    ctx["save_path"] = save_path
-    CHAT_FILES[mode] = {"data": ctx}
-    return jsonify({
-        "ok": True,
-        "filename": ctx["filename"],
-        "meta": ctx["meta"],
-        "type": ctx["type"],
-        "truncated": ctx["truncated"],
-    })
+    return jsonify(result)
 
 
 @app.route("/api/chat_file_clear", methods=["POST"])
@@ -142,8 +183,7 @@ def api_chat_file_clear():
     data = request.get_json(silent=True) or {}
     mode = _clean_mode(data.get("mode", "master"))
     CHAT_FILES.pop(mode, None)
-    if mode == "report":
-        CHAT_ANALYSIS["report"] = None
+    CHAT_ANALYSIS[mode] = None
     return jsonify({"ok": True})
 
 
@@ -196,80 +236,38 @@ def api_chat_generate_presentation():
 
 @app.route("/api/report_upload", methods=["POST"])
 def api_report_upload():
-    """Upload for the Report & Analysis chat. Tabular files (CSV/Excel) get
-    the full analyzer pipeline — stats, trends, anomalies, and a first
-    round of auto-generated charts — so charts and a Word report can be
-    built from this conversation. Other supported file types (PDF/Word/
-    text) fall back to the lighter text extraction, so you can still have a
-    grounded conversation about them, just without chart/report generation
-    (there's no tabular data to chart)."""
+    """Upload for the Report & Analysis chat — same pipeline as
+    /api/chat_upload (see _process_chat_upload), always scoped to the
+    "report" mode."""
     if "file" not in request.files:
         return jsonify({"ok": False, "error": "No file uploaded"}), 400
     f = request.files["file"]
     if f.filename == "":
         return jsonify({"ok": False, "error": "Empty filename"}), 400
 
-    save_path = os.path.join(UPLOAD_DIR, f.filename)
-    f.save(save_path)
-    ext = f.filename.lower().rsplit(".", 1)[-1] if "." in f.filename else ""
-
-    chart_urls = []
-    trends = None
-    anomaly_counts = None
-
     try:
-        if ext in ("csv", "xlsx", "xls"):
-            analysis = analyzer.full_analysis(save_path)
-            CHAT_ANALYSIS["report"] = analysis
-            ctx = {
-                "type": "spreadsheet",
-                "filename": f.filename,
-                "meta": f"{analysis['summary']['rows']} rows × {len(analysis['summary']['columns'])} columns",
-                "content_text": (
-                    f"Columns: {', '.join(analysis['summary']['columns'])}\n"
-                    f"Numeric columns: {', '.join(analysis['summary']['numeric_columns']) or 'none'}"
-                ),
-                "truncated": False,
-            }
-            chart_urls = ["/static/charts/" + os.path.basename(c) for c in analysis["charts"]]
-            trends = analysis["trends"]
-            anomaly_counts = {
-                col: len(info["outlier_row_indices"]) for col, info in analysis["anomalies"].items()
-            }
-        else:
-            CHAT_ANALYSIS["report"] = None
-            ctx = file_context.extract_context(save_path, f.filename)
+        result = _process_chat_upload(f, "report")
     except Exception as e:
         traceback.print_exc()
         return jsonify({"ok": False, "error": str(e)}), 400
 
-    ctx["save_path"] = save_path
-    CHAT_FILES["report"] = {"data": ctx}
-
-    return jsonify({
-        "ok": True,
-        "filename": ctx["filename"],
-        "meta": ctx["meta"],
-        "type": ctx["type"],
-        "truncated": ctx["truncated"],
-        "trends": trends,
-        "anomaly_counts": anomaly_counts,
-        "chart_urls": chart_urls,
-    })
+    return jsonify(result)
 
 
 @app.route("/api/report_generate", methods=["POST"])
 def api_report_generate():
-    """Build a Word report from whatever's currently loaded in the Report &
-    Analysis chat — needs a spreadsheet upload in that chat first."""
-    analysis = CHAT_ANALYSIS.get("report")
+    """Build a Word report from whatever's currently loaded in the given
+    chat (master or report — needs a spreadsheet uploaded in that same
+    chat first, so it has real data to build from)."""
+    data = request.get_json(silent=True) or {}
+    mode = _clean_mode(data.get("mode", "report"))
+    analysis = CHAT_ANALYSIS.get(mode)
     if not analysis:
         return jsonify({
             "ok": False,
             "error": "Upload a CSV or Excel file in this chat first — Word reports need tabular data",
         }), 400
-    data = request.get_json(silent=True) or {}
-    file_ctx = CHAT_FILES.get("report", {}).get("data", {})
+    file_ctx = CHAT_FILES.get(mode, {}).get("data", {})
     default_title = f"{file_ctx.get('filename', 'Data')} — Analysis Report"
     title = data.get("title") or default_title
     fpath = report_gen.build_report(analysis, title)
