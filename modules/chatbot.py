@@ -37,12 +37,37 @@ MODEL_CANDIDATES = [
 ]
 
 SYSTEM_PROMPT = (
-    "You are Saqr, an assistant specialized in data analysis, report "
-    "writing, PowerPoint generation, and problem solving. Be concise and "
-    "practical. If the user's request involves uploading a file, generating "
-    "a report/PPT, or solving a math/logic problem, tell them to use the "
-    "relevant tool button in the interface."
+    "You are Saqr (صقر), a helpful assistant that lives entirely inside a "
+    "chat interface — there are no separate tabs or forms, everything "
+    "happens in this conversation. You can discuss anything, have a real "
+    "conversation about an uploaded file, help build reports and slide "
+    "decks, solve math/logic problems directly, and search the web when "
+    "asked. Be concise, warm, and practical."
 )
+
+# Extra instructions layered on top of SYSTEM_PROMPT depending on which of
+# the three dedicated chats the message came from.
+MODE_PROMPTS = {
+    "report": (
+        "\n\nYou are in the Report & Analysis chat — a dedicated space for "
+        "working with one uploaded data file at a time. Focus on "
+        "understanding the data, answering questions about it, calling out "
+        "trends and outliers, and offering to generate a chart or a "
+        "downloadable Word report when it would genuinely help. If the "
+        "user asks for a presentation/slides/deck, tell them to use the "
+        "PowerPoint chat instead — that's not what this space is for."
+    ),
+    "ppt": (
+        "\n\nYou are in the PowerPoint chat — a dedicated space for "
+        "building presentations, nothing else. When the user gives you a "
+        "file, a topic, or written content, help shape a deck: ask about "
+        "the purpose/audience if it's unclear, suggest a structure, add "
+        "your own ideas and improvements, and confirm before generating. "
+        "If the user asks for general data analysis or a Word report, tell "
+        "them to use the Report & Analysis chat instead — that's not what "
+        "this space is for."
+    ),
+}
 
 
 def is_ollama_running() -> bool:
@@ -51,17 +76,17 @@ def is_ollama_running() -> bool:
     return bool(HF_TOKEN)
 
 
-def _build_system_prompt(data_context: dict = None, file_context: dict = None, web_context: list = None) -> str:
-    prompt = SYSTEM_PROMPT
+def _build_system_prompt(data_context: dict = None, file_context: dict = None, web_context: list = None,
+                          weather_context: dict = None, mode: str = "master", chart_info: dict = None) -> str:
+    prompt = SYSTEM_PROMPT + MODE_PROMPTS.get(mode, "")
 
     if data_context:
         prompt += (
-            "\n\nThe user currently has a dataset loaded in the Analyze tab. "
-            "Here is a compact summary of it (row/column counts, trends, and "
-            "anomaly counts) — use it to answer questions about their data. "
-            "You don't have the raw row-level values from this one, so if "
-            "they ask for an exact individual value, say you don't have "
-            "that level of detail and point them to the Analyze or Charts tab:\n"
+            "\n\nHere is a compact summary of the user's dataset (row/column "
+            "counts, trends, and anomaly counts) — use it to answer "
+            "questions about their data. You don't have the raw row-level "
+            "values from this summary, so if they ask for an exact "
+            "individual value, say you don't have that level of detail:\n"
             + json.dumps(data_context, default=str)
         )
 
@@ -88,6 +113,26 @@ def _build_system_prompt(data_context: dict = None, file_context: dict = None, w
             "results don't actually answer the question, say so honestly "
             "rather than guessing:\n"
             + web_search.format_for_prompt(web_context)
+        )
+
+    if weather_context:
+        prompt += (
+            "\n\nYou just fetched live current weather for the user's "
+            "location (they granted the browser location permission for "
+            "this). Answer naturally and conversationally, like a helpful "
+            "assistant would — don't just dump raw numbers verbatim:\n"
+            + json.dumps(weather_context, default=str)
+        )
+
+    if chart_info:
+        prompt += (
+            "\n\nYou just generated a "
+            f"{chart_info.get('chart_type', 'chart')} chart "
+            f"({', '.join(chart_info.get('y_cols', []))} by {chart_info.get('x_col', '')}) "
+            "for the user in response to their message — it's shown "
+            "directly above your reply. Briefly describe what it shows in "
+            "1-3 sentences, referencing real patterns from the data context "
+            "above if you can, rather than just saying 'here's your chart'."
         )
 
     return prompt
@@ -140,28 +185,38 @@ def chat_raw(system_prompt: str, user_prompt: str, max_tokens: int = 1200, tempe
 
 
 def chat(message: str, model: str = None, history=None, data_context: dict = None,
-         file_context: dict = None, web_context: list = None) -> str:
+         file_context: dict = None, web_context: list = None, weather_context: dict = None,
+         mode: str = "master", chart_info: dict = None) -> str:
     """
     Send a message to the free Hugging Face router API and return its reply.
     `history` is an optional list of {"role": "user"/"assistant", "content": str}
-    `data_context` is an optional compact dict describing the currently
-    loaded dataset (see app.py), used to ground answers in real data.
+    `data_context` is an optional compact dict describing a loaded dataset,
+    used to ground answers in real data.
     `file_context` is an optional dict describing a file attached directly
     in the chat panel (see modules/file_context.py) — filename, meta, and
     extracted text — used to have a real conversation about that file.
     `web_context` is an optional list of {title, snippet, url} search
     results (see modules/web_search.py) for the current message, used to
     ground answers that need up-to-date information.
+    `weather_context` is an optional dict with live weather fetched
+    client-side (browser geolocation + a free weather API), used to answer
+    "what's the weather" style questions quickly and accurately.
+    `mode` is one of "master" / "report" / "ppt" — which of the three chat
+    surfaces this message came from, used to focus the assistant's persona.
+    `chart_info` is an optional dict describing a chart that was just
+    generated for this message (report mode only), so the reply can
+    reference it naturally instead of ignoring it.
     """
     if not HF_TOKEN:
         return (
             "⚠️ Chat isn't configured yet — no HF_TOKEN found. "
             "Create a free token at huggingface.co/settings/tokens and set "
-            "it as the HF_TOKEN environment variable. "
-            "Data analysis, report, PPT, and solver tools still work without it."
+            "it as the HF_TOKEN environment variable."
         )
 
-    messages = [{"role": "system", "content": _build_system_prompt(data_context, file_context, web_context)}]
+    messages = [{"role": "system", "content": _build_system_prompt(
+        data_context, file_context, web_context, weather_context, mode, chart_info
+    )}]
     if history:
         for turn in history:
             role = "user" if turn["role"] == "user" else "assistant"
@@ -199,5 +254,4 @@ def chat(message: str, model: str = None, history=None, data_context: dict = Non
             last_error = "Unexpected response format from the chat model."
             continue
 
-    return f"⚠️ {last_error or 'All chat models are temporarily unavailable — try again shortly.'} " \
-           f"Data analysis, report, PPT, and solver tools still work without this."
+    return f"⚠️ {last_error or 'All chat models are temporarily unavailable — try again shortly.'}"
