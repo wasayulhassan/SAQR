@@ -324,6 +324,9 @@ const TOPIC_STEP = { key: "topic", type: "text", promptKey: "wiz_q_topic", place
 
 const PRESENTATION_TRIGGER_RE = /\b(make|create|build|generate|design|turn this into)\b.{0,60}\b(presentation|slides?|slide ?deck|powerpoint|ppt)\b|\b(presentation|slides?|slide ?deck|powerpoint)\b.{0,40}\b(from|based on|using|out of|for|about)\b.{0,15}\b(this|it|file|attached|attachment)\b/i;
 
+// ---------- shared: "make me a Word report" trigger (master + report chats) ----------
+const REPORT_TRIGGER_RE = /\b(word (doc(ument)?|report)|generate (me )?(a |the )?report|make (me )?(a |the )?(word )?report|create (a |the )?(word )?report|build (me )?(a |the )?(word )?report|write (me )?(a |the )?(word )?report|put together (a |the )?(word )?report|export (this )?as (a |an )?(word )?(doc(ument)?|report)|download (a |the )?(word )?report|report (as|in) word)\b/i;
+
 function extractTopicFromMessage(message){
   const m = (message || "").match(/\b(?:presentation|slides?|slide ?deck|powerpoint|ppt)\b\s*(?:on|about|regarding|covering)\s+(.+?)[\s.!?]*$/i);
   if(!m) return null;
@@ -341,8 +344,9 @@ function createChatSurface(panelEl, mode, opts){
   opts = Object.assign({
     enableWizard: false,       // presentation wizard (master + ppt)
     rawMessageIsTopic: false,  // ppt: any message with no file = the topic itself
-    enableWebSearch: false,    // master only
+    enableWebSearch: false,    // master + report
     enableWeather: false,      // master only
+    enableReportGen: false,    // master + report — "make me a word report" as plain text
     uploadEndpoint: "/api/chat_upload",
   }, opts || {});
 
@@ -617,6 +621,12 @@ function createChatSurface(panelEl, mode, opts){
       }
     }
 
+    if(opts.enableReportGen && REPORT_TRIGGER_RE.test(message)){
+      addMsg(message, "user");
+      await requestReportGeneration();
+      return;
+    }
+
     addMsg(message, "user");
 
     const thinking = document.createElement("div");
@@ -725,7 +735,10 @@ function createChatSurface(panelEl, mode, opts){
       updateFileChipUI();
       addMsg(saqrFormat("file_attached_msg", { filename: data.filename, meta: data.meta }), "bot");
 
-      if(mode === "report"){
+      if(mode === "report" || mode === "master"){
+        // spreadsheets uploaded here get the full analysis pipeline too now
+        // (see _process_chat_upload server-side) — show the auto-charts and,
+        // in the Report chat, reveal the dedicated Generate Report button.
         if(chipReportBtn) chipReportBtn.classList.toggle("hidden", !data.trends);
         if(data.chart_urls && data.chart_urls.length){
           data.chart_urls.forEach(url => addMsg("", "bot", { chartUrl: url }));
@@ -758,14 +771,26 @@ function createChatSurface(panelEl, mode, opts){
     ppWizard = null;
   });
 
-  // ---------------- Report & Analysis: generate Word report ----------------
-  chipReportBtn && chipReportBtn.addEventListener("click", async () => {
-    chipReportBtn.disabled = true;
+  // ---------------- generate Word report (button click OR typed request) ----------------
+  // Shared by the Report & Analysis chip button and by just typing "make me
+  // a word report" in either the Report or master Chat — no button needed
+  // there, the request itself is enough. The server returns a clear error
+  // if there's no spreadsheet loaded in this chat yet.
+  async function requestReportGeneration(){
+    if(chipReportBtn) chipReportBtn.disabled = true;
+    const thinking = document.createElement("div");
+    thinking.className = "msg msg-bot";
+    thinking.innerHTML = '<span class="msg-tag">SAQR</span><div class="msg-body">'
+      + saqrT("report_generating")
+      + ' <span class="typing-dots"><span></span><span></span><span></span></span></div>';
+    chatWindow.appendChild(thinking);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
     try{
       const res = await fetch("/api/report_generate", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
       });
       const data = await res.json();
+      thinking.remove();
       if(!data.ok){
         addMsg(saqrFormat("report_error", { error: data.error }), "bot");
       } else {
@@ -773,10 +798,13 @@ function createChatSurface(panelEl, mode, opts){
         appendDownloadCard(data.download_url, saqrT("report_download_btn"));
       }
     }catch(err){
+      thinking.remove();
       addMsg(saqrFormat("report_error", { error: String(err) }), "bot");
     }
-    chipReportBtn.disabled = false;
-  });
+    if(chipReportBtn) chipReportBtn.disabled = false;
+  }
+
+  chipReportBtn && chipReportBtn.addEventListener("click", requestReportGeneration);
 
   // ---------------- presentation wizard (master + ppt) ----------------
   function addWizardStepMsg(step){
@@ -1101,11 +1129,11 @@ function createChatSurface(panelEl, mode, opts){
 // ============================================================================
 chatSurfaceInstances = [
   createChatSurface(document.getElementById("panel-chat"), "master", {
-    enableWizard: true, enableWebSearch: true, enableWeather: true,
+    enableWizard: true, enableWebSearch: true, enableWeather: true, enableReportGen: true,
     uploadEndpoint: "/api/chat_upload",
   }),
   createChatSurface(document.getElementById("panel-report"), "report", {
-    enableWizard: false, enableWebSearch: true, uploadEndpoint: "/api/report_upload",
+    enableWizard: false, enableWebSearch: true, enableReportGen: true, uploadEndpoint: "/api/report_upload",
   }),
   createChatSurface(document.getElementById("panel-ppt"), "ppt", {
     enableWizard: true, rawMessageIsTopic: true, enableWebSearch: true, uploadEndpoint: "/api/chat_upload",
